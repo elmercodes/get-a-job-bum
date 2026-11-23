@@ -4,7 +4,10 @@
   const H = (window.__harness = { log: [], done: false, error: null });
   const log = (m) => H.log.push(m);
   const api = async (p, body) => {
-    const r = await fetch(p, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+    const r = await fetch(p, {
+      ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}),
+      headers: { Authorization: 'Bearer ' + window.__testApiToken, 'Content-Type': 'application/json' },
+    });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error);
     return d;
@@ -38,9 +41,12 @@
         log(`page ${page} round ${round}: ${rest.length} fields, ${files.length} uploads`);
         if (rest.length) {
           const t0 = Date.now();
-          const { values, needsReview, source } = await api('/api/answer', { fields: rest, job });
+          const { values, needsReview, source, decisions } = await api('/api/answer', { fields: rest, job });
           log(`  answers in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
           const res = await jf.fill(values, needsReview);
+          for (const f of rest) {
+            if (decisions[f.id] && res[f.id]) throw new Error('A protected field was passed to generic fill');
+          }
           for (const f of rest) log(`  [${res[f.id] || 'skipped'}${needsReview.includes(f.id) ? ', review' : ''}] (${f.type}) ${f.label.slice(0, 60)} = ${JSON.stringify(values[f.id])?.slice(0, 70)} <${source[f.id] || '-'}>`);
         }
         for (const f of files) {

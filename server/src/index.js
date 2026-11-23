@@ -4,6 +4,9 @@ import path from 'node:path';
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
+import { localApi } from './local-api.js';
+import { acknowledge, partitionFields, setSettings, settings } from './automation.js';
+import { UploadError, validateUpload } from './uploads.js';
 import mammoth from 'mammoth';
 import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import { chatJSON, describeProvider, describeHeavy, geminiStatus, usedFallbackRecently, aiUsage } from './llm.js';
@@ -22,33 +25,38 @@ import { mailConfigured, mailStatus, findVerification, sendApplication, smtpChec
 import { renderResumePDF, renderCoverLetterPDF } from './pdf.js';
 import { answerFields } from './answer.js';
 import { followUpDraft, interviewPrep } from './coach.js';
-import { saveAppExtra, DATA_DIR, writeJSON, backupData } from './store.js';
+import { saveAppExtra, DATA_DIR, writeJSON, backupData, prepareSubmission, authorizeSubmission, settleSubmission } from './store.js';
 import { getProfile, saveProfile, listApplications, upsertApplication, updateApplication, deleteApplication, STATUSES, rememberAnswers, getDocument, saveDocument, removeDocument, DOCUMENT_KINDS, DEFAULT_ANSWERS, RESUME_DIR, recordGaps, listGaps, saveGaps } from './store.js';
 
 const PORT = Number(process.env.PORT || 8787);
 const app = express();
-// Only the extension (and local pages) may call this server. EXTENSION_ID pins it to yours (chrome://extensions).
-const EXT_ID = process.env.EXTENSION_ID;
-const allowedOrigin = (o) => !o || (EXT_ID ? o === `chrome-extension://${EXT_ID}` : o.startsWith('chrome-extension://')) || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(o);
-// DNS rebinding: a web page whose domain resolves to 127.0.0.1 is "same origin" and sends no Origin, but keeps its own Host.
-app.use((req, res, next) => (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '') ? next() : res.status(403).json({ error: 'Forbidden host' })));
-app.use(cors({ origin: (origin, cb) => cb(null, allowedOrigin(origin)) }));
-// Browsers still send "simple" cross-site requests (e.g. a form upload) even when CORS blocks the response,
-// so any request from a web page that isn't the extension or localhost is refused outright.
-app.use((req, res, next) => (allowedOrigin(req.headers.origin) ? next() : res.status(403).json({ error: 'Forbidden origin' })));
-app.use(express.json({ limit: '15mb' })); // page screenshots for the visual check
-// Dev aid: a sample application form, plus the content script so it can be tried without loading the extension.
-app.use('/test', express.static(path.resolve(import.meta.dirname, '../test')));
-app.use('/test/ext', express.static(path.resolve(import.meta.dirname, '../../extension')));
+const TEST_MODE = process.env.AUTOJOB_TEST === '1';
+if (TEST_MODE && !process.env.AUTOJOB_DATA) throw new Error('Test mode requires a disposable AUTOJOB_DATA directory');
+const mailEnabled = process.env.AUTOJOB_ENABLE_MAIL === '1';
+const visionEnabled = process.env.AUTOJOB_ENABLE_VISION === '1';
+const gate = localApi({ port: PORT, token: process.env.AUTOJOB_TOKEN, extensionId: process.env.EXTENSION_ID, test: TEST_MODE });
+app.disable('x-powered-by');
+app.use(gate.checkHost);
+app.use(cors({ origin: (origin, cb) => cb(null, gate.allowedOrigin(origin)) }));
+if (TEST_MODE) {
+  app.use('/test/ext', express.static(path.resolve(import.meta.dirname, '../../extension')));
+  app.use('/test', express.static(path.resolve(import.meta.dirname, '../test')));
+}
+app.use('/api', gate.checkClient);
+app.use(express.json({ limit: '15mb' }));
+app.use('/api', (req, res, next) => {
+  const disabled = (!mailEnabled && /^\/(?:mail|otp|email\/(?:send|check)|applications\/trace)(?:\/|$)/.test(req.path)) ||
+    (!visionEnabled && req.path === '/vision');
+  if (disabled) return res.status(403).json({ error: 'This integration is disabled' });
+  next();
+});
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
-const route = (fn) => (req, res) =>
-  fn(req, res).catch((e) => {
-    console.error(e);
-    res.status(500).json({ error: e.message });
-  });
+const uploadLimits = { fieldSize: 4096, fields: 2 };
+const resumeUpload = multer({ storage: multer.memoryStorage(), limits: { ...uploadLimits, fileSize: 5 * 1024 * 1024, files: 4, parts: 7 } });
+const documentUpload = multer({ storage: multer.memoryStorage(), limits: { ...uploadLimits, fileSize: 10 * 1024 * 1024, files: 1, parts: 4 } });
+const route = (fn) => (req, res, next) => fn(req, res).catch(next);
 
-app.get('/api/health', (req, res) => res.json({ ok: true, llm: describeProvider(), heavy: describeHeavy(), resting: geminiStatus(), usingLocalAI: usedFallbackRecently(), gmail: mailConfigured(), hasProfile: !!getProfile(), ai: aiUsage() }));
+app.get('/api/health', (req, res) => res.json({ ok: true, llm: describeProvider(), heavy: describeHeavy(), resting: geminiStatus(), usingLocalAI: usedFallbackRecently(), gmail: mailEnabled && mailConfigured(), vision: visionEnabled, hasProfile: !!getProfile(), ai: aiUsage() }));
 
 // Upload one or more resume versions (PDF / DOCX / TXT) and merge them into one structured profile.
 async function resumeText(file) {
@@ -82,12 +90,15 @@ function keepManualEdits(parsed, old) {
   }
 }
 
-app.post('/api/profile/import', upload.array('resume', 20), route(async (req, res) => {
+app.post('/api/profile/import', resumeUpload.array('resume', 4), route(async (req, res) => {
   if (!req.files?.length) return res.status(400).json({ error: 'No file uploaded' });
   const seen = new Set();
   const versions = [];
   for (const file of req.files) {
-    const text = (await resumeText(file)).trim();
+    await validateUpload(file, { resume: true });
+    const text = await resumeText(file).then((value) => value.trim()).catch(() => {
+      throw new UploadError('Could not read the resume document');
+    });
     const key = text.replace(/\s+/g, ' ').slice(0, 4000);
     if (!text || seen.has(key)) continue;
     seen.add(key);
@@ -133,7 +144,7 @@ app.post('/api/tailor', route(async (req, res) => {
   const { title = '', company = '' } = req.body;
   // Postings are untrusted input: hidden text and instruction-shaped lines never reach the model.
   const { text: description, stripped } = cleanJobText(req.body.description);
-  if (stripped.length) console.warn(`Posting integrity gate: stripped ${stripped.length} instruction-shaped line(s), first: ${stripped[0]}`);
+  if (stripped.length) console.warn('Posting integrity gate removed instruction-shaped lines', { count: stripped.length });
   if (description.trim().length < 80) return res.status(400).json({ error: 'Job description is missing or too short' });
 
   const { answers, sourceText, ...resume } = profile;
@@ -169,13 +180,46 @@ app.post('/api/tailor', route(async (req, res) => {
   });
 }));
 
-// Decide what to type into each detected form field.
+app.get('/api/automation/settings', (req, res) => res.json(settings()));
+app.put('/api/automation/settings', (req, res) => {
+  try {
+    res.json(setSettings(req.body || {}, getProfile()));
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    res.status(400).json({ error: error.message });
+  }
+});
+const validField = (f) => f && typeof f.id === 'string' && /^[\w:-]{1,80}$/.test(f.id) &&
+  typeof f.label === 'string' && f.label.length <= 2000 && typeof f.type === 'string' &&
+  !['__proto__', 'constructor', 'prototype'].includes(f.id) &&
+  (f.contextUrl === undefined || !!webUrl(f.contextUrl)) &&
+  (f.options === undefined || (Array.isArray(f.options) && f.options.length <= 500 && f.options.every((v) => typeof v === 'string'))) &&
+  (f.terms === undefined || (typeof f.terms === 'string' && f.terms.length <= 4000)) &&
+  (f.links === undefined || (Array.isArray(f.links) && f.links.length <= 12 && f.links.every((v) => typeof v === 'string' && /^https?:\/\//.test(v))));
+app.post('/api/automation/acknowledge', (req, res) => {
+  const { scope, field, remember } = req.body || {};
+  if (!validField(field) || !acknowledge({ scope, field, remember, profile: getProfile() })) {
+    return res.status(409).json({ error: 'This disclosure needs direct review on the application page' });
+  }
+  res.json({ ok: true });
+});
+
+// Apply the authorization policy before rules, memory, repair, or model use.
 app.post('/api/answer', route(async (req, res) => {
   const profile = getProfile();
   if (!profile) return res.status(400).json({ error: 'Import your resume first' });
-  const { sourceText, ...rest } = profile;
+  const { fields, scope, errors = {} } = req.body || {};
+  if (!Array.isArray(fields) || fields.length > 400 || !fields.every(validField)) return res.status(400).json({ error: 'Invalid fields' });
+  const { ordinary, decisions, permits, values } = partitionFields(fields, scope, profile);
+  const safeFields = ordinary.map(({ terms, links, incompleteTerms, ...field }) => field);
+  const safeErrors = Object.fromEntries(safeFields.filter((field) => Object.hasOwn(errors || {}, field.id)).map((field) => [field.id, errors[field.id]]));
+  const { sourceText, documents, answerBank, personal, answers, ...resume } = profile;
   const job = req.body.job ? { ...req.body.job, description: cleanJobText(req.body.job.description).text } : undefined;
-  res.json(await answerFields({ fields: req.body.fields || [], profile: rest, job, coverLetter: req.body.coverLetter, errors: req.body.errors || {}, pageErrors: req.body.pageErrors || [] }));
+  const result = await answerFields({
+    fields: safeFields, profile: { ...resume, answerBank, personal, answers }, job,
+    coverLetter: req.body.coverLetter, errors: safeErrors, pageErrors: [],
+  });
+  res.json({ ...result, values: { ...result.values, ...values }, decisions, permits });
 }));
 
 const STOCK = /I am (writing|applying)|validates? my|my capacity|leverag\w+|proves? my (ability|capability)|demonstrates? my|showcas\w+|my technical foundation|beyond these tools|passionate|excited|thrilled|perfect fit|I believe|I am confident|dream job|esteemed|leverage my|hit the ground running|from day one/gi;
@@ -229,8 +273,12 @@ app.get('/api/documents', (req, res) => {
   const docs = getProfile()?.documents || {};
   res.json({ kinds: DOCUMENT_KINDS, saved: Object.fromEntries(DOCUMENT_KINDS.filter((k) => docs[k]).map((k) => [k, docs[k]])) });
 });
-app.post('/api/documents/:kind', upload.single('file'), route(async (req, res) => {
+app.post('/api/documents/:kind', documentUpload.single('file'), route(async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  if (!['photo', 'marksheet10', 'marksheet12', 'degree', 'transcript'].includes(req.params.kind)) {
+    return res.status(400).json({ error: 'Unsupported document type. Attach sensitive documents directly on the application page.' });
+  }
+  await validateUpload(req.file);
   res.json({ ok: true, name: saveDocument(req.params.kind, req.file.originalname, req.file.buffer) });
 }));
 app.delete('/api/documents/:kind', (req, res) => {
@@ -239,6 +287,9 @@ app.delete('/api/documents/:kind', (req, res) => {
 });
 
 app.get('/api/documents/:kind', (req, res) => {
+  if (!['photo', 'marksheet10', 'marksheet12', 'degree', 'transcript'].includes(req.params.kind)) {
+    return res.status(404).json({ error: 'Document unavailable' });
+  }
   const doc = getDocument(req.params.kind);
   if (!doc) return res.status(404).json({ error: `No ${req.params.kind} saved in your profile` });
   res.json(doc);
@@ -387,10 +438,52 @@ app.post('/api/export', route(async (req, res) => {
   res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(Buffer.from(buf));
 }));
 
-// Application tracker: saved → applied → assessment → interviews → offer / rejected.
-app.get('/api/applications', (req, res) => res.json({ statuses: STATUSES, items: listApplications() }));
-app.post('/api/applications', (req, res) => res.json(upsertApplication(req.body)));
-app.post('/api/applications/bulk', (req, res) => res.json((req.body.items || []).map((a) => upsertApplication(a))));
+// Pending reviews and review nonces are internal workflow records.
+app.get('/api/applications', (req, res) => res.json({
+  statuses: STATUSES,
+  items: listApplications().map(({ submissionReview, ...item }) => item),
+}));
+const trackerEntry = (entry) => Object.fromEntries(
+  ['id', 'title', 'company', 'location', 'url', 'notes', 'contact', 'status', 'description', 'resume', 'coverLetter'].map((key) => [key, entry?.[key]]),
+);
+app.post('/api/applications', (req, res) => res.json(upsertApplication(trackerEntry(req.body))));
+app.post('/api/applications/bulk', (req, res) => res.json((req.body.items || []).map((a) => upsertApplication(trackerEntry(a)))));
+function webUrl(value) {
+  if (typeof value !== 'string' || value.length > 2048) return '';
+  try {
+    const url = new URL(value);
+    return /^https?:$/.test(url.protocol) && !url.username && !url.password ? url.href : '';
+  } catch {
+    return '';
+  }
+}
+app.post('/api/submissions/review', (req, res) => {
+  const { url, nonce, snapshot, label, job } = req.body || {};
+  if (!webUrl(url) || typeof nonce !== 'string' || !/^[a-f0-9-]{36}$/.test(nonce) ||
+      typeof snapshot !== 'string' || !/^[a-f0-9]{64}$/.test(snapshot) || typeof label !== 'string' || !label || label.length > 60) {
+    return res.status(400).json({ error: 'Invalid review' });
+  }
+  const review = prepareSubmission({ url, nonce, snapshot, label, job: {
+    url: webUrl(job?.url), title: String(job?.title || '').slice(0, 250), company: String(job?.company || '').slice(0, 150),
+  } });
+  if (!review) return res.status(409).json({ error: 'An application with a previous attempt already exists' });
+  res.status(201).json(review);
+});
+app.post('/api/submissions/:id/authorize', (req, res) => {
+  const approval = req.body?.confirmed === true && authorizeSubmission(req.params.id, req.body);
+  if (!approval) return res.status(409).json({ error: 'Review expired, changed, or was already used' });
+  res.json(approval);
+});
+app.post('/api/submissions/:id/result', (req, res) => {
+  const { clicked, receipt, manuallyConfirmed } = req.body || {};
+  const result = settleSubmission(req.params.id, {
+    clicked: clicked === true,
+    receipt: clicked === true && typeof receipt === 'string' && /^[a-z0-9][a-z0-9-]{3,63}$/i.test(receipt),
+    manuallyConfirmed: manuallyConfirmed === true,
+  });
+  if (!result) return res.status(409).json({ error: 'No unresolved submission attempt' });
+  res.json(result);
+});
 // The exact resume / cover letter PDF you sent with an application (newest copy with that name).
 app.get('/api/resumes/:name', (req, res) => {
   const name = path.basename(String(req.params.name));
@@ -403,12 +496,12 @@ app.get('/api/resumes/:name', (req, res) => {
 app.post('/api/report-form', (req, res) => {
   const { html = '', host = 'site', failures = [], errors = [] } = req.body || {};
   if (!/^<!doctype html>/i.test(html) || html.length > 1_200_000) return res.status(400).json({ error: 'Not a form snapshot' });
-  const dir = path.resolve(import.meta.dirname, '../test/reports');
+  const dir = path.join(DATA_DIR, 'reports');
   fs.mkdirSync(dir, { recursive: true });
   const name = `${String(host).replace(/[^a-z0-9.-]+/gi, '-').replace(/^www\./, '')}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}`;
   const notes = `<!-- What Auto Job saw fail:\n${[...failures.map((f) => `  field: ${String(f.label).slice(0, 120)} -> ${String(f.error).slice(0, 160)}`), ...errors.map((e) => `  page: ${String(e).slice(0, 160)}`)].join('\n').replace(/--/g, '-')}\n-->\n`;
   fs.writeFileSync(path.join(dir, `${name}.html`), html.replace(/<\/head>/i, `${notes}</head>`));
-  res.json({ ok: true, file: `server/test/reports/${name}.html`, url: `/test/reports/${name}.html` });
+  res.json({ ok: true, file: 'reports/' + name + '.html' });
 });
 
 // Trace outcomes from Gmail: rejections, interviews, assessments, offers, confirmations. apply=true moves the
@@ -484,6 +577,18 @@ app.delete('/api/applications/:id', (req, res) => {
   if (gone?.mail?.length) writeJSON(IGNORED_FILE, [...new Set([...ignoredMail(), ...gone.mail.map((m) => m.id)])].slice(-5000));
   deleteApplication(req.params.id);
   res.json({ ok: true });
+});
+
+app.use((error, req, res, next) => {
+  if (res.headersSent) return next(error);
+  if (error instanceof UploadError) return res.status(400).json({ error: error.message });
+  if (error instanceof multer.MulterError) {
+    return res.status(error.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: 'Upload exceeds the permitted size or file count' });
+  }
+  if (error.status === 413) return res.status(413).json({ error: 'Request too large' });
+  if (error.status === 400) return res.status(400).json({ error: 'Invalid request' });
+  console.error('Local API request failed', { method: req.method, status: 500 });
+  res.status(500).json({ error: 'Local request failed' });
 });
 
 // A dated copy of your profile and tracker each day (data/backups, last 7 kept).

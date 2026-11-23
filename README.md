@@ -350,54 +350,9 @@ flowchart LR
 
 ## Quick start
 
-You need **Node.js 20+**, **Google Chrome or Arc**, and either a **Gemini API key** (free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)) or **[Ollama](https://ollama.com)** for a fully local model.
+Follow the [Phase 1 setup guide](docs/PHASE_1.md) to install dependencies, load the extension, pair it with the loopback server, and review the application automation preferences.
 
-**1. Get the code and start the server**
-
-```bash
-git clone https://github.com/batmandevx/Auto-Job.git
-```
-
-```bash
-cd Auto-Job/server && npm install
-```
-
-```bash
-cp .env.example .env
-```
-
-Open `server/.env`, set `LLM_PROVIDER=gemini` and paste your key into `GEMINI_API_KEY=`. Then start it:
-
-```bash
-npm start
-```
-
-You should see `Auto Job server on http://localhost:8787`.
-
-**2. Load the extension**
-
-| Chrome / Edge / Brave | Arc |
-|---|---|
-| Open `chrome://extensions` | Open `arc://extensions` |
-| Turn on **Developer mode** | Turn on **Developer mode** |
-| **Load unpacked** → choose the `extension` folder | **Load unpacked** → choose the `extension` folder |
-| Pin **Auto Job** and click it: it opens as a **sidebar** | Pin it from the puzzle-piece menu and click it: it opens as a **popup** (Arc can't show side panels) |
-
-**3. Import your resume**
-
-Open the panel → **Profile** → **Choose resume files** → pick one or more resume versions (PDF / DOCX) → **Import resume**. Then fill **Personal details** and **Standard answers** once (notice period, expected CTC, work authorisation, and so on).
-
-**4. Apply**
-
-Open any job posting, press **Do it all on this page**, review the orange fields, and press **I've checked everything: Submit** twice.
-
-The Profile tab also includes availability, timezone, PST-overlap, and hourly-rate answers for opportunity platforms that use custom button steps instead of standard ATS fields. Leave any of these blank when you want Auto Job to stop and ask you to decide.
-
-Auto Job also recognizes nested React/Next option cards, custom button groups, ARIA controls, and navigation labels such as **Add your profile**, **Review and confirm**, and **Continue to review**. It uses the same profile rules and review highlighting as standard ATS fields rather than relying on a site-specific integration.
-
-For employer portals such as Amazon Jobs, Profile answers can also provide education eligibility, computer-science fundamentals, location preferences, CGPA scale/current CGPA, and active-backlog status. Location preferences are matched against aliases such as **Bangalore/Bengaluru** and are kept distinct across first, second, and third choices.
-
-> **Optional:** connect Gmail for one-time codes. Create an App Password at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) (needs 2-Step Verification), then set `GMAIL_USER` and `GMAIL_APP_PASSWORD` in `server/.env` and restart. The panel header shows **gmail ✓**.
+On a permitted employer site, grant access if needed, open the application, and choose **Fill application**. Review unresolved fields and any document or disclosure prompts. At the final page choose **Review application**, then explicitly approve the specific submission if the panel supports that form.
 
 ## Using every feature
 
@@ -408,14 +363,14 @@ For employer portals such as Amazon Jobs, Profile answers can also provide educa
 | **Do it all on this page** | The whole flow: read the job → press Apply → tailor → cover letter → fill every page → stop at review. |
 | **1 · Job** | Reads the posting (JSON-LD, page text, visible description only). You can edit title, company and location before tailoring. |
 | **2 · Resume & cover letter** | Tailor on its own, see the keyword coverage, download the PDF, write a cover letter, or open **Apply by email**. |
-| **3 · Fill form** | **Fill this page** (also presses *Apply now* first on a job page) and **Continue to next pages**. |
+| **3 · Fill form** | **Fill application**, **Stop filling**, and **Continue to next pages** on a permitted portal. |
 | **Auto Next** | Clicks Next / Continue / Save and Continue after each page. Never clicks the final Submit. |
 | **Cover letter** | Writes and attaches a cover letter whenever the form asks for one (file or text box). |
 | **Only empty** | Leaves alone what the site already filled, for example after "Autofill with resume". Boxes the site still flags as empty, and link boxes, are always fixed. |
 | **100% keywords** | Puts job keywords you don't have yet on a visible "Familiar with / learning" line. Off by default. |
-| **👁 Visual check** | After each page, screenshots it and asks Gemini what looks wrong, then fixes those fields. On by default; uses one AI request per page. Needs `LLM_PROVIDER=gemini`. |
-| **⌨️ Real typing** | Retypes boxes the site still rejects with real keystrokes through Chrome's debugger. On by default. Chrome shows a "started debugging this browser" bar while it types. |
-| **I've checked everything: Submit** | Press twice within 10 seconds. Only then does Auto Job click the site's Submit, add the job to your Tracker and remember your reviewed answers. |
+| **👁 Visual check** | After each page, screenshots it and asks Gemini what looks wrong, then fixes those fields. Requires explicit backend and panel opt-in. Needs `LLM_PROVIDER=gemini`. |
+| **⌨️ Real typing** | Chrome debugger access is disabled in Phase 1. |
+| **Final submission** | Review the application and use **Approve and submit this application**. The tracker verifies the outcome separately. |
 
 **Colours on the page:** green = filled from your profile or memory · orange = AI-written, consent box or "please check" · red = needs you.
 
@@ -435,12 +390,7 @@ For employer portals such as Amazon Jobs, Profile answers can also provide educa
 4. Ticking jobs brings up a bar at the bottom with **Start applying**, **☆ Save** and **✕** (untick all), so you don't scroll back to the buttons. The boards card folds away once jobs are found; tap it to open.
    **☆ Save to tracker** saves ticked jobs as *To apply*. **📊 Excel** exports the list shown, best match first, with Apply links.
 5. **+ Save board** keeps any link as a one-tap board.
-6. **Copy Wellfound script:** copies a console script that applies to Wellfound jobs with a personal message. Unlike the rest of Auto Job, **this script submits by itself**, so try it first with `dryRun: true`.
-   - **Your details:** the public script holds only placeholders, in a clearly marked **YOUR DETAILS** block at the top (name, one-line intro, highlights, links). The Copy button fills that block from your Auto Job profile. Or edit it yourself: save your copy as `extension/scripts/wellfound-autoapply.local.js`. *.local.js files are git-ignored, so your details are never committed, and the Copy button always prefers that file.
-   - **Settings** (the `CONFIG` block): `dryRun` (fill, don't submit), `maxApplications` per run (default 25), `maxAgeDays` (skip older posts, default 7), `skipTitles` (e.g. `['senior', 'manager']`).
-   - **Safety:** it won't run while placeholders are still there. Type `window.wellfoundStop = true` in the console to stop it. At the end it prints a table of every job it applied to.
-- **Copy LinkedIn script (Easy Apply):** same pattern for LinkedIn — opens each Easy Apply job, fills every step from your profile (name, contact, links, a regex-matched answers map for Yes/No and dropdown questions), and pages through the search results. **Smart about what it can't answer:** a job with an unanswered *required* field is skipped, never submitted incomplete. It **starts as a dry run** (`dryRun: true` fills everything, submits nothing — flip it to `false` once you've watched one). Stop it with `window.linkedinStop = true`. ⚠️ Automation is against LinkedIn's terms: bulk runs can get your account restricted, so the defaults are conservative (10 per run, 20–40 s pacing). Your own copy: `extension/scripts/linkedin-autoapply.local.js` (git-ignored); the panel's Copy button fills your details.
-- **Copy Naukri script:** same idea for Naukri. Naukri opens each job as a new page (which would kill a normal console script), so this one loads each job page in a **hidden same-origin iframe** (Naukri allows same-origin framing), applies inside it, and removes it — your real tab never navigates. On a single `/job-listings-…` page it just applies there. Label-driven answers, unanswered required fields are skipped, dry run first, stop with `window.naukriStop = true`. ⚠️ Same terms caveat as LinkedIn: keep volume low. Your own copy: `extension/scripts/naukri-autoapply.local.js`; the panel's Copy button fills your details.
+Use the copy-and-paste workflow for LinkedIn and Indeed, then open the employer's actual application to use Fill.
 
 **Keyboard:** `1`–`5` switch tabs, `/` jumps to the open tab's search box, `Esc` clears it.
 
@@ -640,7 +590,7 @@ What makes it work on real portals and not only on simple forms:
 
 **🔎 Check before you continue:** after filling, the page is read back. Dates that end before they start, descriptions that only repeat the company or location, and required boxes still empty are listed under the page's results. Entries your profile doesn't have (Workday's import sometimes adds a second, empty Education) get a **Delete it** button. Nothing is deleted unless you press it.
 
-**Characters a site forbids** (Workday: `< > [ ] " { } \`): descriptions are typed with single quotes, and when a site names forbidden characters, self-healing removes them and retypes.
+**Characters a site forbids** (Workday: `< > [ ] " { } `): descriptions are typed with single quotes, and when a site names forbidden characters, self-healing removes them and retypes.
 
 **Built against real portals:** fixes came from live applications on Workday (U.S. Bank), Lever (Acron Aviation), Phenom (GE HealthCare), Eightfold (PayPal: conflict-of-interest questions, legal name, voluntary self-ID, custom comboboxes), Meta careers (phone-code dropdown, gender/disability self-ID, site pre-fills corrected), PyjamaHR, Recruit CRM and Indian job boards. Each has a matching test page in `server/test/`. Greenhouse, Ashby, SmartRecruiters, iCIMS and other ATS links are recognised, and every other site gets the same generic engine.
 
@@ -703,10 +653,12 @@ flowchart TD
 - **Facts come from your profile, not from the AI.** If a fact is missing (say a salary you never entered), the field is left empty and flagged.
 - **Everything the AI wrote is orange.** So are consent boxes and anything Auto Job isn't sure about.
 - **Job postings are untrusted input.** Before any posting text reaches a model, hidden characters and instruction-shaped lines ("ignore your instructions…") are stripped and logged — a malicious posting can't inject claims into your resume or answers.
-- **You submit.** The final Submit needs two clicks from you. Only answers you reviewed and submitted are remembered.
+- **Submission authority.** Review and explicitly approve the specific application. The tracker asks for confirmation when it cannot verify the outcome.
 - **CAPTCHAs and passwords stay with you.** Password fields are never filled, and CAPTCHAs are never solved.
 
 ## Privacy and security
+
+Current pairing, storage, and permissions are documented in the [Phase 1 guide](docs/PHASE_1.md).
 
 - **Your data stays on your Mac.** The `data/` folder holds your profile, documents, tracker and every generated PDF. It's in `.gitignore` and never leaves your machine, except as the text sent to the AI provider you choose. Use Ollama to keep even that local.
 - **Secrets live in `server/.env`** (git-ignored): your AI key and Gmail app password. The panel never sees them.
@@ -807,7 +759,7 @@ Auto-Job/
 
 ## Testing without a real job
 
-With the server running, open any of these and use the panel on it:
+With the isolated test server running in test mode, open a fixture and use the panel on it:
 
 | Page | What it exercises |
 |---|---|
@@ -835,10 +787,10 @@ With the server running, open any of these and use the panel on it:
 
 All paths are on `http://localhost:8787`.
 
-**Run all of them at once** (headless Chrome, your running server, your profile):
+**Run the suite with a disposable fictional profile:**
 
 ```bash
-cd server && npm test
+scripts/test-phase1.sh
 ```
 
 GitHub runs the same tests on every push (`.github/workflows/test.yml`) with a made-up demo profile and no AI key. It prints each page with how many fields were filled and any that weren't, and exits with an error if something regressed. Pass page names to run only some, for example `node test/run-all.mjs tricky workday`. `node test/run-all.mjs --reports` runs your saved *Report this form* snapshots instead, to see what still fails on real portals. `heal.html` and `strict.html` exercise the panel's self-healing and real typing, so test those from the side panel.

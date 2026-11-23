@@ -1,7 +1,7 @@
 // Injected into every frame of the job page by the side panel.
 // Exposes window.__jobfill: scan / fill / upload / next / submit helpers. Never submits on its own.
 (() => {
-  if (window.__jobfill?.version === 9) return;
+  if (window.__jobfill?.version === 10) return;
 
   const SKIP_TYPES = new Set(['hidden', 'submit', 'button', 'reset', 'image', 'password']);
   const clean = (s) => (s || '').replace(/[\u200B-\u200D\u2060\uFEFF]/g, '').replace(/\s+/g, ' ').trim(); // zero-width padding (PyjamaHR) is not text
@@ -356,6 +356,49 @@
     (!!m.dataset?.jfChosen) ||
     (!!m.dataset?.jfPlain && /(^|[\s_-])(selected|active|is-?active|is-?selected|checked|chosen|pressed)($|[\s_-])/i.test(typeof m.className === 'string' ? m.className : '')));
 
+  // Bind decisions to the visible declaration, links, and current control.
+  const policy = globalThis.applicationPolicy;
+  const observed = new Map();
+  const authorizedWrites = new Map();
+  let finalForm;
+  window.addEventListener('keydown', (event) => {
+    const input = event.composedPath()[0];
+    if (event.key === 'Enter' && finalForm?.isConnected && input?.form === finalForm &&
+        input.matches('input:not([type="submit"]):not([type="button"]):not([type="checkbox"]):not([type="radio"])') &&
+        input.getAttribute('role') !== 'combobox') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, true);
+  const termGroup = '[data-declaration], [data-disclosure], fieldset, [role="group"]';
+  function evidenceFor(field, control) {
+    if (!control) return { ...field, incompleteTerms: true };
+    const original = groups.get(field.id);
+    const label = original ? groupLabel(original) : field.type === 'checkbox' && control.tagName === 'INPUT'
+      ? optionLabel(control) || labelFor(control) : labelFor(control);
+    const result = { ...field, label: label || field.label, required: isRequired(control, label) || (original || []).some((el) => isRequired(el, '')) };
+    const kind = policy.classify(result);
+    const group = control.closest(termGroup);
+    if (kind === 'ordinary' && field.type !== 'checkbox' && field.type !== 'radio') return result;
+    const nearby = [...(control.labels || []), control.closest('label'), group].filter(Boolean);
+    const desc = (control.getAttribute('aria-describedby') || '').split(/\s+/).map((id) => control.ownerDocument.getElementById(id)).filter(Boolean);
+    const parts = [...new Set([...nearby, ...desc])];
+    const texts = desc.length ? desc : group ? [group] : [];
+    const text = policy.normalize(texts.map((part) => part.innerText || part.textContent).join(' '));
+    const links = [...new Set(parts.flatMap((part) => [...part.querySelectorAll('a[href]')].filter(shown).map((a) => a.href)))];
+    const terms = text === result.label ? '' : text;
+    return {
+      ...result, contextUrl: location.href, terms: terms.slice(0, 4000), links: links.filter((link) => /^https?:\/\//.test(link)).slice(0, 12),
+      incompleteTerms: text.length > 4000 || links.length > 12 || links.some((link) => !/^https?:\/\//.test(link)),
+    };
+  }
+
+  const safeOrdinary = (id) => {
+    const f = observed.get(id);
+    const el = findById(id);
+    return !!f && !!el && policy.classify(evidenceFor(f, el)) === 'ordinary';
+  };
+
   // ---------- scan ----------
   let counter = 0;
   const groups = new Map(); // field id -> member elements (radio / checkbox groups, button groups)
@@ -506,6 +549,7 @@
 
   async function scan() {
     groups.clear();
+    observed.clear();
     const fields = [];
     const seen = new Set();
     const all = deepAll(CONTROL);
@@ -692,7 +736,15 @@
       // description): your profile is the source of truth, so every part of a role is written from it.
       if (WORK.test(f.section) && ROLE_PART.test(base(f)) && f.type !== 'file') f.filled = false;
     }
-    return { url: location.href, fields, next: nextLabel(), submit: submitLabel(), errors: errorTexts(), checkEmail: checkEmailPage() };
+    finalForm = findSubmit()?.form || null;
+    const withEvidence = fields.map((field) => {
+      const el = findById(field.id);
+      const current = evidenceFor(field, el);
+      observed.set(field.id, field);
+      // Keep the scanner's section, date and option labels intact for ordinary fields.
+      return policy.classify(current) === 'ordinary' ? field : current;
+    });
+    return { url: location.href, fields: withEvidence, next: nextLabel(), submit: submitLabel(), errors: errorTexts(), checkEmail: checkEmailPage() };
   }
 
   // 6 single-character boxes ("Enter the code we sent you") -> one field the panel fills with the whole code.
@@ -1300,10 +1352,23 @@
     return status;
   }
 
-  async function fill(values, needsReview = []) {
+  async function fill(values, needsReview = [], permits = {}) {
     const results = {};
     for (const [id, value] of Object.entries(values)) {
       if (value === '' || value === null || value === undefined || (Array.isArray(value) && !value.length)) continue;
+      const current = observed.get(id);
+      const element = findById(id);
+      if (!current || !element || !element.isConnected) {
+        results[id] = 'needs review';
+        continue;
+      }
+      const evidence = evidenceFor(current, element);
+      const kind = policy.classify(evidence);
+      if (kind !== 'ordinary' && !(['privacy', 'legal', 'background', 'signature'].includes(kind) &&
+          permits[id]?.value === value && JSON.stringify(permits[id].evidence) === JSON.stringify(policy.fieldEvidence(evidence)))) {
+        results[id] = 'needs authorization';
+        continue;
+      }
       try {
         let status = await fillOne(id, value, needsReview.includes(id));
         // Trust but verify: read the field back; if it didn't take, try the other strategies once.
@@ -1311,6 +1376,10 @@
           await sleep(300);
           if (!holds(id, value)) {
             const el = findById(id);
+            if (kind !== 'ordinary') {
+              results[id] = 'needs manual verification';
+              continue;
+            }
             if (el && comboKind(el)) status = await chooseFromList(el, Array.isArray(value) ? value[0] : value, true);
             else status = await fillOne(id, value, needsReview.includes(id));
             await sleep(250);
@@ -1321,6 +1390,9 @@
           }
         }
         results[id] = status;
+        if (status === 'filled' && kind !== 'ordinary') {
+          authorizedWrites.set(id, JSON.stringify(permits[id].evidence));
+        }
       } catch (e) {
         results[id] = `error: ${e.message}`;
       }
@@ -1859,29 +1931,114 @@
       .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '') // "NEXT ▸", "‹ Back", "Continue →"
       .slice(0, 60);
 
-  const SUBMIT_RE = /^(submit( application| my application| your application)?|send( application)?|apply|finish|complete( application)?|submit & finish|confirm and submit)$/i;
-  const NEXT_RE = /^(next( step| page)?|continue( to .*)?|verify( code| email| otp)?|confirm code|submit code|save (and|&) continue|save (and|&) next|proceed|review( application| your application)?|review and confirm|add your profile|confirm (availability|timezone|time zone|rate)|next:.*|continue to .*|→|>)$/i;
+  const SUBMIT_RE = /^(submit(?: (?:my |your |this )?application)?|send(?: application)?|apply|finish|complete(?: application)?|submit & finish|confirm and submit)$/i;
+  const NEXT_RE = /^(next(?: step| page)?|continue(?: to (?:the )?(?:next step|review|application|education|experience|questions))?|save (?:and|&) (?:continue|next)|review(?: your)? application|review|add your profile|confirm (?:availability|timezone|time zone|rate))$/i;
+  const finalLabel = (button) => /\b(submit|send|finish|finaliz\w*|complete application)\b|^apply(?: now)?$/i.test(btnText(button));
 
   function findSubmit() {
-    const list = buttons();
-    return list.find((b) => SUBMIT_RE.test(btnText(b))) || list.find((b) => b.type === 'submit' && /submit|apply|send/i.test(btnText(b))) || null;
+    const candidates = buttons().filter((button) => SUBMIT_RE.test(btnText(button)));
+    return candidates.length === 1 ? candidates[0] : null;
   }
   function findNext() {
-    const list = buttons().filter((b) => !/back|previous|cancel|save draft|save for later/i.test(btnText(b)) && !SUBMIT_RE.test(btnText(b)));
-    return list.find((b) => NEXT_RE.test(btnText(b))) ||
-      list.find((b) => /next|continue|proceed|review/i.test(`${b.getAttribute('aria-label') || ''} ${b.getAttribute('data-testid') || ''}`) && !/submit|apply/i.test(btnText(b))) ||
-      list.find((b) => b.matches('[data-automation-id="bottom-navigation-next-button"], [data-testid*="next" i]')) || null;
+    const list = buttons();
+    if (list.some(finalLabel)) return null;
+    const matching = list.filter((button) => NEXT_RE.test(btnText(button)) && !finalLabel(button) &&
+      (button.matches('button, input[type="button"], input[type="submit"]')));
+    return matching.length === 1 ? matching[0] : null;
   }
   const submitLabel = () => (findSubmit() ? btnText(findSubmit()) : null);
   const nextLabel = () => (findNext() ? btnText(findNext()) : null);
 
-  function click(b) {
-    b.scrollIntoView({ block: 'center' });
-    b.click();
-    return { ok: true, label: btnText(b) };
+  // Page scripts can submit from change listeners or synthetic Enter events. Guard the
+  // native submit event and any final-button click while this extension is acting.
+  async function protect(action, allowed = null) {
+    const stop = (event) => {
+      const control = event.type === 'submit' ? event.submitter : event.composedPath().find(
+        (node) => node instanceof Element && node.matches('button, input[type="submit"], [role="button"]'));
+      if (control === allowed && allowed) return;
+      if (event.type !== 'submit' && (!control || !finalLabel(control))) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    window.addEventListener('submit', stop, true);
+    window.addEventListener('click', stop, true);
+    try {
+      return await action();
+    } finally {
+      window.removeEventListener('submit', stop, true);
+      window.removeEventListener('click', stop, true);
+    }
   }
-  const clickNext = () => (findNext() ? click(findNext()) : { ok: false, reason: 'no Next button' });
-  const clickSubmit = () => (findSubmit() ? click(findSubmit()) : { ok: false, reason: 'no submit button found' });
+
+  function click(button) {
+    button.scrollIntoView({ block: 'center' });
+    button.click();
+    return { ok: true, label: btnText(button) };
+  }
+
+  const clickNext = () => {
+    const next = findNext();
+    if (!next) return { ok: false, reason: 'No unambiguous intermediate button' };
+    if (next.form && [...next.form.elements].some((el) => shown(el) && el.willValidate && !el.validity.valid)) return { ok: false, reason: 'Complete the required fields' };
+    return protect(() => click(next));
+  };
+
+  let reviewedSubmission;
+  function submissionData(button) {
+    const controls = [...(button.form?.elements || deepAll(CONTROL))].filter((el) => el.type !== 'submit');
+    const data = controls.map((el) => [el.name, el.id, el.type, el.value, el.checked,
+      el.type === 'file' ? [...(el.files || [])].map((file) => [file.name, file.size, file.lastModified]) : null,
+      observed.has(el.dataset.jfId) ? policy.fieldEvidence(evidenceFor(observed.get(el.dataset.jfId), el)) : null]);
+    return JSON.stringify([
+      location.href, btnText(button), button.form?.action, button.getAttribute('formaction'),
+      button.form?.method, button.getAttribute('formmethod'), data,
+    ]);
+  }
+
+  async function submissionSnapshot(data) {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(data));
+    return [...new Uint8Array(digest)].map((code) => code.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function prepareSubmit() {
+    reviewedSubmission = null;
+    const { fields } = await protect(scan);
+    if (fields.some((field) => {
+      const previous = authorizedWrites.get(field.id);
+      return (field.required && !field.filled) ||
+        (previous && JSON.stringify(policy.fieldEvidence(field)) !== previous);
+    })) return null;
+    const target = findSubmit();
+    if (!target || findNext() || !target.form || target.type !== 'submit' || target.matches('[formtarget]') ||
+        (target.form.target && target.form.target !== '_self') || !target.form.checkValidity() ||
+        new URL(target.getAttribute('formaction') || target.form.action, location.href).origin !== location.origin) return null;
+    if (submissionReceipt()) return null;
+    const snapshot = await submissionSnapshot(submissionData(target));
+    const review = { nonce: crypto.randomUUID(), url: location.href, label: btnText(target), snapshot };
+    reviewedSubmission = { target, review };
+    return review;
+  }
+
+  async function clickSubmit(approval) {
+    const previous = reviewedSubmission;
+    reviewedSubmission = null;
+    if (!previous || !approval || typeof approval.expires !== 'number' || approval.expires < Date.now()) return { ok: false };
+    const { target, review } = previous;
+    const data = submissionData(target);
+    if (approval.nonce !== review.nonce || approval.snapshot !== review.snapshot || approval.url !== location.href ||
+        findSubmit() !== target || !target.form?.checkValidity() || await submissionSnapshot(data) !== review.snapshot ||
+        findSubmit() !== target || submissionData(target) !== data || approval.expires < Date.now()) return { ok: false };
+    return protect(() => click(target), target);
+  }
+
+  function submissionReceipt() {
+    const confirmation = document.querySelector('main, [role="main"]') || document.body;
+    if (!confirmation || deepAll('form').some(shown) || errorTexts().length) return null;
+    const title = [...confirmation.querySelectorAll('h1, h2, [role="heading"]')].filter(shown).map((el) => clean(el.textContent));
+    const success = title.some((line) => /^(?:application (?:received|submitted)(?: successfully)?|thank you for (?:applying|your application))[!.]?$/i.test(line));
+    const receipt = clean(confirmation.innerText).match(/\b(?:application|submission|confirmation) (?:id|number|reference)\s*[:#]\s*([a-z0-9][a-z0-9-]{3,63})\b/i);
+    return success && receipt ? receipt[1] : null;
+  }
 
   // Validation messages the site shows after a failed Next / Submit.
   function errorTexts() {
@@ -1892,7 +2049,7 @@
   // On a job description page: the "Apply" button / link that opens the form.
   function clickApply() {
     // Never a form's own submit button (some final pages say "Apply"): that would send the application.
-    const isFormSubmit = (b) => { const f = b.closest('form'); return !!f && [...f.querySelectorAll('input:not([type=hidden]):not([type=search]), select, textarea')].filter(shown).length >= 2; };
+    const isFormSubmit = (b) => !!(b.closest('form') || b.form) || b.type === 'submit';
     const cands = [...buttons(), ...deepAll('a')].filter((b) => shown(b) && !isFormSubmit(b)); // Apply buttons often sit in a sticky header, so no chrome filter here
     const b =
       cands.find((b) => /^(apply( now)?|apply for (this )?(job|position|role)|easy apply|i'?m interested|start application|apply on company site)$/i.test(btnText(b))) ||
@@ -1908,7 +2065,7 @@
     const { fields } = await scan();
     const out = [];
     for (const f of fields) {
-      if (f.type === 'file' || !f.filled) continue;
+      if (f.type === 'file' || !f.filled || policy.classify(f) !== 'ordinary') continue;
       const members = groups.get(f.id);
       let value;
       if (members) value = members.filter(isChecked).map(optionLabel).join(', ');
@@ -2077,6 +2234,7 @@
 
   // Real typing (Chrome debugger): put the cursor in the field with its text selected, so the typed text replaces it.
   function prepareType(id) {
+    if (!safeOrdinary(id)) return null;
     const el = findById(id);
     if (!el) return { ok: false };
     el.scrollIntoView({ block: 'center', behavior: 'instant' });
@@ -2140,6 +2298,7 @@
   }
   // Where to click for a field: the matching radio / checkbox option, or the visible box of a dropdown.
   function clickPoint(id, value) {
+    if (!safeOrdinary(id)) return null;
     const members = groups.get(id);
     if (members) {
       const i = members.length === 1 ? 0 : bestMatch(members.map(optionLabel), String(Array.isArray(value) ? value[0] : value));
@@ -2220,14 +2379,16 @@
   const pageKey = () => deepAll(CONTROL).filter(shown).map((e) => e.name || e.id || labelFor(e).slice(0, 30)).join('|').slice(0, 2000) + '#' + location.href;
 
   window.__jobfill = {
-    version: 9,
-    scan,
-    fill,
-    uploadFile,
-    snapshot,
+    version: 10,
+    scan: () => protect(scan),
+    fill: (...args) => protect(() => fill(...args)),
+    uploadFile: (...args) => protect(() => uploadFile(...args)),
+    snapshot: () => protect(snapshot),
     clickNext,
+    prepareSubmit,
     clickSubmit,
-    clickApply,
+    submissionReceipt,
+    clickApply: () => protect(clickApply),
     nextLabel,
     submitLabel,
     errorTexts,
@@ -2238,14 +2399,14 @@
     fieldErrors,
     readFieldValue,
     waitStable,
-    addEntry,
+    addEntry: (...args) => protect(() => addEntry(...args)),
     auditPage,
-    deleteEntry,
-    revealAll,
+    deleteEntry: (...args) => protect(() => deleteEntry(...args)),
+    revealAll: (...args) => protect(() => revealAll(...args)),
     sectionEntries,
-    addLinkRows,
+    addLinkRows: (...args) => protect(() => addLinkRows(...args)),
     lostValues,
-    openFixCard,
+    openFixCard: (...args) => protect(() => openFixCard(...args)),
     focusCaptcha,
     focusPassword,
     prepareType,

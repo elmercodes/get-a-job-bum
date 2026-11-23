@@ -8,6 +8,8 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 const BASE = process.env.AUTOJOB_URL || 'http://localhost:8787', PORT = 9337;
 const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const token = process.env.AUTOJOB_TOKEN;
+if (!token || !/^[a-f0-9]{64}$/.test(token)) throw new Error('Set the isolated fixture server token');
 const PAGES = process.argv.slice(2).length ? process.argv.slice(2) : ['form', 'hard', 'tricky', 'recruitcrm', 'sections', 'pyjama', 'fixcard', 'langs', 'workday', 'wdexp', 'wdstate', 'wdreal', 'juspay', 'jobpage', 'otp', 'oracle', 'harman', 'pwc', 'turing', 'eightfold', 'meta', 'scan-versatile', 'scan-entries', 'scan-widgets'];
 // --reports: run your saved "Report this form" snapshots (server/test/reports, never committed) to see what still fails.
 if (process.argv.includes('--reports')) {
@@ -28,6 +30,8 @@ let failures = 0;
 for (const p of PAGES) {
   errors.length = 0;
   await send('Page.navigate', { url: `${BASE}/test/${p}.html` }); await sleep(1800);
+  await js('window.__testApiToken = ' + JSON.stringify(token));
+  await js("new Promise((ok) => { const s = document.createElement('script'); s.src = '/test/ext/application-policy.js'; s.onload = ok; s.onerror = ok; document.head.appendChild(s); })");
   // scan-* pages check themselves (what the scan understood, and filling the widget kinds) without the AI.
   if (p.startsWith('scan-')) {
     await js(`new Promise((ok) => { const s = document.createElement('script'); s.src = '/test/ext/content.js?' + Date.now(); s.onload = ok; s.onerror = ok; document.head.appendChild(s); })`);

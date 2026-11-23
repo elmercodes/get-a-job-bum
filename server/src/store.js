@@ -1,12 +1,25 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import policy from '../../extension/application-policy.js';
 import { fileURLToPath } from 'node:url';
 
-export const DATA_DIR = process.env.AUTOJOB_DATA ? path.resolve(process.env.AUTOJOB_DATA) : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../data'); // AUTOJOB_DATA: a different data folder (tests)
+process.umask(0o077);
+
+const legacyRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../data');
+const defaultRoot = process.platform === 'win32'
+  ? path.join(process.env.LOCALAPPDATA || os.homedir(), 'Get a Job Bum')
+  : process.platform === 'darwin'
+    ? path.join(os.homedir(), 'Library', 'Application Support', 'Get a Job Bum')
+    : path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'get-a-job-bum');
+export const DATA_DIR = process.env.AUTOJOB_DATA ? path.resolve(process.env.AUTOJOB_DATA) : defaultRoot;
+if (!process.env.AUTOJOB_DATA && !fs.existsSync(defaultRoot) && fs.existsSync(legacyRoot)) {
+  throw new Error('Legacy data detected. Back it up and copy it into the private application data folder or set AUTOJOB_DATA explicitly.');
+}
 export const RESUME_DIR = path.join(DATA_DIR, 'resumes');
 export const DOCS_DIR = path.join(DATA_DIR, 'documents');
-fs.mkdirSync(RESUME_DIR, { recursive: true });
-fs.mkdirSync(DOCS_DIR, { recursive: true });
+fs.mkdirSync(RESUME_DIR, { recursive: true, mode: 0o700 });
+fs.mkdirSync(DOCS_DIR, { recursive: true, mode: 0o700 });
 
 const PROFILE = path.join(DATA_DIR, 'profile.json');
 const APPS = path.join(DATA_DIR, 'applications.json');
@@ -88,7 +101,7 @@ const read = (file, fallback) => {
 };
 // Write to a temp file, then rename: a crash mid-write never leaves half a JSON file (read() would return the fallback).
 export const writeJSON = (file, value) => {
-  fs.writeFileSync(`${file}.tmp`, JSON.stringify(value, null, 2));
+  fs.writeFileSync(`${file}.tmp`, JSON.stringify(value, null, 2), { mode: 0o600 });
   fs.renameSync(`${file}.tmp`, file);
 };
 const write = writeJSON;
@@ -115,14 +128,14 @@ export const saveProfile = (profile) => write(PROFILE, profile);
 
 // ---------- application tracker ----------
 // One record per job (matched by URL, else company + title), with a status history.
-export const STATUSES = ['saved', 'applied', 'assessment', 'interview1', 'interview2', 'interview3', 'hr', 'offer', 'accepted', 'rejected', 'withdrawn'];
+export const STATUSES = ['saved', 'prepared', 'submission_unverified', 'applied', 'assessment', 'interview1', 'interview2', 'interview3', 'hr', 'offer', 'accepted', 'rejected', 'withdrawn'];
 
 const appKey = (a) => (a.url ? String(a.url).split('#')[0] : `${a.company || ''}|${a.title || ''}`.toLowerCase());
 
 export function upsertApplication(entry) {
   const apps = read(APPS, []);
   const now = new Date().toISOString();
-  const status = STATUSES.includes(entry.status) ? entry.status : 'applied';
+  const status = STATUSES.includes(entry.status) ? entry.status : 'saved';
   let app = apps.find((a) => (entry.id && a.id === entry.id) || appKey(a) === appKey(entry));
   if (!app) {
     app = { id: Math.random().toString(36).slice(2, 10), createdAt: now, history: [], notes: '' };
@@ -130,7 +143,7 @@ export function upsertApplication(entry) {
   }
   const { id, history, ...fields } = entry;
   // Saving a job for later never downgrades one you already applied to.
-  const keepStatus = status === 'saved' && app.status && app.status !== 'saved';
+  const keepStatus = (status === 'saved' && app.status && app.status !== 'saved') || app.status === 'submission_unverified';
   Object.assign(app, Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined && v !== '')), { status: keepStatus ? app.status : status, updatedAt: now });
   if (!keepStatus && app.history.at(-1)?.status !== app.status) app.history.push({ status: app.status, at: now });
   if (app.status === 'applied' && !app.appliedAt) app.appliedAt = now;
@@ -153,7 +166,7 @@ export function updateApplication(id, patch) {
   const app = apps.find((a) => a.id === id);
   if (!app) return null;
   const now = new Date().toISOString();
-  if (patch.status && STATUSES.includes(patch.status) && patch.status !== app.status) {
+  if (app.status !== 'submission_unverified' && patch.status && STATUSES.includes(patch.status) && patch.status !== app.status) {
     app.status = patch.status;
     app.history.push({ status: patch.status, at: now });
     if (patch.status === 'applied' && !app.appliedAt) app.appliedAt = now;
@@ -257,6 +270,7 @@ export function rememberAnswers(entries) {
   if (!p) return 0;
   let n = 0;
   for (const e of entries || []) {
+    if (policy.classify(e) !== 'ordinary') continue;
     const key = bankKey(e.label);
     const value = typeof e.value === 'string' ? e.value.trim() : e.value;
     // Job-specific prose ("why us?") is not worth remembering verbatim.
@@ -270,4 +284,53 @@ export function rememberAnswers(entries) {
   }
   saveProfile(p);
   return n;
+}
+
+// A click lease is consumed before the extension interacts with the employer page.
+// The recorded attempt survives process restarts and ambiguous browser outcomes.
+export function prepareSubmission({ nonce, url, snapshot, label, job }) {
+  const submitted = read(APPS, []);
+  const identity = (job?.url || url).split('#')[0];
+  const existing = submitted.find((item) => appKey(item) === identity || item.portalUrl === url);
+  if (existing?.submissionAttemptedAt || existing?.appliedAt) return null;
+  const record = upsertApplication({
+    id: existing?.id, url: identity, title: job?.title, company: job?.company, status: 'prepared',
+    portalUrl: url, preparedAt: new Date().toISOString(),
+    submissionReview: { nonce, snapshot, label, expires: Date.now() + 10 * 60_000 },
+  });
+  return { id: record.id, preparedAt: record.preparedAt };
+}
+
+export function authorizeSubmission(id, details) {
+  const applications = read(APPS, []);
+  const record = applications.find((item) => item.id === id);
+  const review = record?.submissionReview;
+  if (!record || record.submissionAttemptedAt || record.status !== 'prepared' ||
+      !review || review.expires < Date.now() || record.portalUrl !== details.url ||
+      review.nonce !== details.nonce || review.snapshot !== details.snapshot) return null;
+  delete record.submissionReview;
+  record.submissionAttemptedAt = record.updatedAt = new Date().toISOString();
+  record.status = 'submission_unverified';
+  record.history.push({ status: record.status, at: record.updatedAt });
+  write(APPS, applications);
+  return { nonce: review.nonce, snapshot: review.snapshot, url: record.portalUrl, expires: Date.now() + 10_000 };
+}
+
+export function settleSubmission(id, evidence) {
+  const applications = read(APPS, []);
+  const record = applications.find((item) => item.id === id);
+  if (!record?.submissionAttemptedAt || record.status !== 'submission_unverified') return null;
+  const now = new Date().toISOString();
+  if (evidence.clicked) record.submittedAt ||= now;
+  if (evidence.receipt || evidence.manuallyConfirmed) {
+    record.submittedAt ||= now;
+    record.verifiedAt = now;
+    record.appliedAt = record.submittedAt;
+    record.status = 'applied';
+    record.verification = evidence.receipt ? 'portal_receipt' : 'user_confirmed';
+    record.history.push({ status: record.status, at: now });
+  }
+  record.updatedAt = now;
+  write(APPS, applications);
+  return { status: record.status, submittedAt: record.submittedAt, verifiedAt: record.verifiedAt };
 }

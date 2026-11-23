@@ -574,3 +574,5 @@ button.mini { font-size: 12px; padding: 2px 8px; margin-left: 4px; }
 /* Hacks: why a hackathon fits you */
 .hb.match { background: color-mix(in srgb, #16a34a 14%, transparent); color: #15803d; font-weight: 600; }
 #hackTheme { max-width: 150px; }
+
+#submit[hidden] { display: none; }

@@ -8,6 +8,8 @@
 
 > **Read this before building:** `AGENTS.md` defines non-negotiable rules for coding agents. `docs/ACCEPTANCE_MATRIX.md` defines observable pass/fail criteria. `docs/SECURITY_PRIVACY.md` is a release-blocking threat model. `docs/UPSTREAM_AUDIT.md` is the first implementation task. When this blueprint is copied to the real fork, it must be adapted to the actual source code—not the other way around.
 
+> Phase 1 uses the owner-approved [application authorization policy](docs/PHASE_1.md) for consent, electronic signatures, and final submission. This updates the original manual-submission requirement throughout this blueprint.
+
 ## 0. Executive decision
 
 Create a **free/open-source, private-by-default, human-supervised job application copilot**. A job seeker browses LinkedIn/Indeed/employer sites, opens a compact Chrome side panel, manually pastes a job description on restricted sites or invokes opt-in capture where permitted, lets AI research the company and role, gets an **evidence-grounded, editable DOCX resume preserving the original template**, and—on permitted application sites—lets an agent fill and verify multi-step applications while requesting missing user facts. A local tracker is authoritative; Google Sheets is an optional synchronized view. **Final submission must remain manual.**

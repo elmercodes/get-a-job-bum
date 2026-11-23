@@ -31,7 +31,7 @@
 | A25 | P0 | Ask unknown salary/relocation/authorization question | No guessed default; panel blocks and asks exact question |
 | A26 | P0 | User approves one scoped reusable answer | Correct matching future field uses answer with conditions; unrelated contexts prompt |
 | A27 | P0 | Revoke/expire a saved answer | Future form does not reuse revoked/expired answer |
-| A28 | P0 | Form displays final Submit/consent checkbox | Agent never clicks or checks it; user must act manually |
+| A28 | P0 | Form has required consent and a final Submit | Consent follows stored category and exact terms approval. Fill cannot submit. A reviewed application requires a separate one-use approval before assisted submission. |
 | A29 | P0 | Save, prepare and apply fake job | Distinct timestamps; `submitted_at` only after explicit confirmed submission |
 | A30 | P0 | Run same job twice | One canonical job/app record or intentional resume versions; no tracker duplication |
 | A31 | P0 | User edits tracker/exports local data | Updates survive restart; export includes correct fields, no secrets |

@@ -452,9 +452,7 @@ function bankValue(field, bank) {
 }
 
 const COVER = /cover\s*letter|letter\s*of\s*(motivation|interest)|motivation\s*letter/i;
-const CONSENT = /\b(i have read|i've read|i agree|i accept|i consent|i acknowledge|i certify|i confirm|i declare|i understand|i commit|i hereby|i will (comply|adhere|abide|follow)|privacy (policy|information|notice|statement)|terms (and|&) conditions|terms of (use|service))\b/i;
 // The "yes" choice of an agreement dropdown / radio: "I Agree", "Agree", "Yes", "I accept", "I understand"…
-const AGREE_OPTION = /^(i\s+)?(agree|accept|consent|acknowledge|understand|confirm|yes)\b/i;
 
 // Which of your roles each Work Experience entry on the page is: by title, company (typos allowed: "Microsfot") and
 // start date, each role used once. Entries that match nothing take your remaining roles in order.
@@ -516,29 +514,16 @@ export async function answerFields({ fields, profile, job, coverLetter, errors =
   const source = {};
   const pending = [];
   const consentIds = [];
-  const { answerBank = {}, ...forModel } = profile;
+  const { answerBank = {}, documents, answers, personal, sourceText, sourceFiles, ...forModel } = profile;
   for (const f of fields) {
     if (f.type === 'file') continue;
     if (f.roleIndex === -1) continue; // an extra work entry: keep what the site has, never let the AI invent a role
     const err = errors[f.id];
     let v = err ? quickFix(f, err) : ruleValue(f, profile, job);
     if (err && v !== undefined) source[f.id] = 'auto-fix';
-    // "I have read the privacy information", "I agree to the terms": tick, and flag for your review.
-    if (v === undefined && f.type === 'checkbox' && CONSENT.test(f.label)) {
-      v = true;
-      consentIds.push(f.id);
-    }
     if (v === undefined && !err && f.type === 'checkbox' && /\bfresher\b|no (prior|work) experience|i have no experience/i.test(f.label)) v = fresher(profile);
     // "I have a preferred name" (Eightfold legal-name section): you don't, so the box stays unticked.
     if (v === undefined && !err && f.type === 'checkbox' && /\b(i have|do you have) a preferred name\b/i.test(f.label)) v = false;
-    // Agreement dropdowns / radios ("I understand that… *" with I Agree / I Disagree): pick the agree option.
-    if (v === undefined && !err && f.options?.length && CONSENT.test(f.label)) {
-      const agree = f.options.find((o) => AGREE_OPTION.test(String(o).trim()) && !/disagree|not|don/i.test(o));
-      if (agree) {
-        v = agree;
-        consentIds.push(f.id);
-      }
-    }
     // Your profile says no family member *is* in government; "ever employed" is broader: filled, but you check it.
     if (v !== undefined && /family|relative|spouse|parent|sibling|business partner/i.test(f.label) && /government|civil service|military|public sector/i.test(f.label)) consentIds.push(f.id);
     if (v !== undefined) source[f.id] = source[f.id] || 'profile';
@@ -569,7 +554,7 @@ export async function answerFields({ fields, profile, job, coverLetter, errors =
       out = await chatJSON(ANSWER_SYSTEM, user, { temperature: 0.3, budgetMs: 45000 });
     } catch (e) {
       // The AI being slow or out of quota must not block the page: fill what's known, flag the rest for you.
-      return { values, needsReview: [...consentIds, ...pending.map((f) => f.id)], source, aiError: String(e.message || e).slice(0, 160) };
+      return { values, needsReview: [...consentIds, ...pending.map((f) => f.id)], source, aiError: 'Model unavailable' };
     }
     const byId = new Map(pending.map((f) => [f.id, f]));
     for (const [id, v] of Object.entries(out.values || {})) {

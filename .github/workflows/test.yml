@@ -20,22 +20,9 @@ jobs:
           cache: npm
           cache-dependency-path: server/package-lock.json
       - run: npm ci
-      - name: Demo data folder
-        run: mkdir -p "$RUNNER_TEMP/data" && cp test/fixtures/*.json "$RUNNER_TEMP/data/"
-      - name: "Start the server (profile rules only, no AI)"
-        run: |
-          AUTOJOB_DATA="$RUNNER_TEMP/data" LLM_PROVIDER=ollama OLLAMA_URL=http://127.0.0.1:9 OLLAMA_FALLBACK=off nohup node src/index.js > server.log 2>&1 &
-          for i in $(seq 1 30); do curl -sf http://localhost:8787/api/health && break; sleep 1; done
-      - name: Fill every test form
+      - name: Check tracked paths
+        run: bash ../scripts/privacy-preflight.sh
+      - name: Run fictional browser and API tests
         env:
-          CI: 'true'
           CHROME: /usr/bin/google-chrome
-        shell: bash
-        run: |
-          set -o pipefail
-          npm test 2>&1 | tee results.txt
-      - if: always()
-        run: |
-          { echo '### Test forms'; echo '```'; cat results.txt 2>/dev/null; echo '```'; echo '### Server log'; echo '```'; tail -40 server.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          tail -30 results.txt 2>/dev/null | while IFS= read -r l; do echo "::notice::$l"; done
-          tail -15 server.log | while IFS= read -r l; do echo "::notice::server: $l"; done
+        run: bash ../scripts/test-phase1.sh

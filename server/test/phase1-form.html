@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Fictional Phase 1 portal</title>
+<main>
+  <h1>Fictional application</h1>
+  <form id="application">
+    <section id="contact">
+      <label for="first">First Name</label><input id="first" name="first" required>
+      <button id="continue" type="button">Continue</button>
+    </section>
+    <section id="review" hidden>
+      <label><input id="privacy" type="checkbox" required aria-describedby="privacyNotice"> I acknowledge the privacy policy</label>
+      <p id="privacyNotice">Fictional Example Employer retains these application materials for six months.</p>
+      <label><input id="legal" type="checkbox" required> I certify that I am at least 18 years old</label>
+      <label><input id="background" type="checkbox" required aria-describedby="backgroundNotice"> I authorize the background check</label>
+      <p id="backgroundNotice">Fictional Example Employer will obtain an employment screening report for this application only.</p>
+      <label for="signature">Electronic signature</label><input id="signature" name="signed" required aria-describedby="signatureNotice">
+      <p id="signatureNotice">I certify that I am at least 18 years old</p>
+      <label><input id="marketing" type="checkbox"> I consent to marketing and newsletters</label>
+      <label><input id="ambiguous" type="checkbox"> Confirm</label>
+      <label for="degree">Degree certificate</label><input id="degree" type="file" accept=".pdf">
+      <button id="final" type="submit">Submit Application</button>
+    </section>
+  </form>
+</main>
+<script>
+  const form = document.getElementById('application');
+  const final = document.getElementById('final');
+  window.submissionCount = 0;
+  document.getElementById('continue').addEventListener('click', () => {
+    document.getElementById('contact').hidden = true;
+    document.getElementById('review').hidden = false;
+    for (const input of document.querySelectorAll('#review input')) input.disabled = false;
+  });
+  for (const input of document.querySelectorAll('#review input')) input.disabled = true;
+  document.getElementById('first').addEventListener('input', () => form.requestSubmit());
+  document.getElementById('signature').addEventListener('change', () => form.requestSubmit(final));
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    window.submissionCount++;
+    if (new URLSearchParams(location.search).has('unclear')) return;
+    document.querySelector('main').innerHTML = '<h1>Application received</h1><p>Application ID: FICTIONAL-0123</p>';
+  });
+</script>
+</html>

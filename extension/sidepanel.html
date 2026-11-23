@@ -29,6 +29,7 @@
   <div class="popup-note dock-note" id="dockNote" hidden>Want Auto Job as a sidebar that stays open? <button id="dockNow" class="btn primary sm">▤ Dock as sidebar</button><small>After this, the toolbar icon opens the sidebar. Also: right-click the icon → "Open Auto Job as sidebar", or Alt+Shift+S. (Arc can't dock: it keeps this popup.)</small><small class="bad-text" id="dockError"></small></div>
   <div class="popup-note" id="popupNote" hidden>Running from the toolbar popup: keep it open while it works, or <button id="popoutNow" class="linkish">pop it out ⧉</button>.</div>
 
+  <div class="popup-note"><button id="grantSite" class="linkish">Allow access to the current employer site</button></div>
   <nav class="tabs" role="tablist">
     <span class="tab-pill" id="tabPill" aria-hidden="true"></span>
     <button data-tab="apply" class="active" role="tab">
@@ -62,9 +63,9 @@
           <label class="switch"><input type="checkbox" id="autoCover" checked /><span class="track"></span>Cover letter</label>
           <label class="switch"><input type="checkbox" id="onlyEmpty" checked /><span class="track"></span>Only empty</label>
           <label class="switch" title="Adds job keywords you don't have yet to a 'Familiar with / learning' line, so the resume covers 100% of keywords without claiming experience"><input type="checkbox" id="fillGaps" /><span class="track"></span>100% keywords</label>
-          <label class="switch" title="After filling each page, takes screenshots and asks Gemini what looks wrong on screen (errors, empty required fields, wrong values), then fixes those fields"><input type="checkbox" id="visualCheck" checked /><span class="track"></span>👁 Visual check</label>
-          <label class="switch" title="Fields a site still rejects get retyped with real keystrokes through Chrome's debugger. Chrome shows a 'started debugging' bar while it types"><input type="checkbox" id="realTyping" checked /><span class="track"></span>⌨️ Real typing</label>
-          <label class="switch" title="Before tailoring, research the company (website, Wikipedia, news) so the cover letter uses real, sourced facts. Saved for a week per company"><input type="checkbox" id="researchFirst" checked /><span class="track"></span>🔎 Research company</label>
+          <label class="switch" title="After filling each page, takes screenshots and asks Gemini what looks wrong on screen (errors, empty required fields, wrong values), then fixes those fields"><input type="checkbox" id="visualCheck" /><span class="track"></span>👁 Visual check</label>
+          <label class="switch" title="Fields a site still rejects get retyped with real keystrokes through Chrome's debugger. Chrome shows a 'started debugging' bar while it types"><input type="checkbox" id="realTyping" /><span class="track"></span>⌨️ Real typing</label>
+          <label class="switch" title="Before tailoring, research the company (website, Wikipedia, news) so the cover letter uses real, sourced facts. Saved for a week per company"><input type="checkbox" id="researchFirst" /><span class="track"></span>🔎 Research company</label>
         </div>
         <div id="progress" class="progress" aria-live="polite"></div>
       </div>
@@ -110,9 +111,10 @@
         <summary><span class="num">3</span>Fill form<span class="sum-meta" id="fillMeta"></span></summary>
         <div class="section-body">
           <div class="row">
-            <button id="fill" class="btn ghost">Fill this page</button>
+            <button id="fill" class="btn ghost">Fill application</button>
             <button id="reportForm" class="btn ghost sm" title="Save a privacy-scrubbed copy of this form (structure, labels, errors; no values) as a test page, so whatever went wrong can be fixed for good">🐞 Report this form</button>
             <button id="continue" class="btn ghost">Continue to next pages</button>
+            <button id="stopApplication" class="btn ghost">Stop filling</button>
           </div>
           <div class="legend"><span><i class="sw ok"></i>filled</span><span><i class="sw warn"></i>please check</span><span><i class="sw bad"></i>needs you</span></div>
           <div id="fillOut" class="results"></div>
@@ -138,10 +140,11 @@
       </details>
 
       <div class="card submit-card">
-        <button id="submit" class="btn success big">
-          <svg viewBox="0 0 24 24" class="ico"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg>
-          <span>I've checked everything: Submit</span>
-        </button>
+        <button id="reviewApplication" class="btn ghost big">Review application</button>
+        <button id="submit" class="btn success big" hidden disabled>Approve and submit this application</button>
+        <p class="hint">Review the form and unresolved fields before approving submission.</p>
+        <div id="authorizationQueue"></div>
+        <div id="applicationAudit" aria-live="polite"></div>
         <div id="submitOut"></div>
       </div>
     </section>
@@ -198,75 +201,6 @@
           <button id="saveSelected" class="btn ghost" title="Add ticked jobs to your Tracker as “To apply”">☆ Save to tracker</button>
         </div>
         <div id="queueOut" class="hint"></div>
-      </div>
-      <div class="card script-card">
-        <div class="row between" style="margin:0">
-          <div>
-            <h3 class="card-title">Wellfound auto-apply script</h3>
-            <p class="hint" style="margin:0">Your console script: opens each job, fills your pitch, and applies.</p>
-          </div>
-          <span class="badge">Wellfound</span>
-        </div>
-        <ol class="steps-mini">
-          <li>Open <a href="https://wellfound.com/jobs" target="_blank">wellfound.com/jobs</a> and sign in</li>
-          <li>Press <kbd>⌥</kbd><kbd>⌘</kbd><kbd>J</kbd> to open the Console</li>
-          <li>Paste (<kbd>⌘</kbd><kbd>V</kbd>) and press <kbd>Enter</kbd></li>
-        </ol>
-        <p class="hint warn-note">⚠️ It submits each application straight away (no review), picks the first relocation option, and answers custom radio questions by position. Watch the first few.</p>
-        <div class="row">
-          <button id="copyWellfound" class="btn primary">
-            <svg viewBox="0 0 24 24" class="ico"><rect x="9" y="9" width="11" height="11" rx="2" fill="none"/><path d="M5 15V5a2 2 0 0 1 2-2h8" fill="none"/></svg>
-            <span>Copy script</span>
-          </button>
-          <button id="viewWellfound" class="btn ghost">View</button>
-        </div>
-        <pre id="wellfoundCode" class="code" hidden></pre>
-      </div>
-      <div class="card script-card">
-        <div class="row between" style="margin:0">
-          <div>
-            <h3 class="card-title">LinkedIn Easy Apply script</h3>
-            <p class="hint" style="margin:0">Smart console script: fills each Easy Apply step from your profile, skips unanswerable jobs, never submits incomplete.</p>
-          </div>
-          <span class="badge">LinkedIn</span>
-        </div>
-        <ol class="steps-mini">
-          <li>Open <a href="https://www.linkedin.com/jobs/search/?f_AL=true" target="_blank">linkedin.com/jobs/search/?f_AL=true</a> (Easy Apply filter) and sign in</li>
-          <li>Press <kbd>⌥</kbd><kbd>⌘</kbd><kbd>J</kbd> to open the Console</li>
-          <li>Paste (<kbd>⌘</kbd><kbd>V</kbd>) and press <kbd>Enter</kbd></li>
-        </ol>
-        <p class="hint warn-note">⚠️ Starts as a dry run (fills, submits nothing). Automation is against LinkedIn's terms — keep volume low or your account can be restricted.</p>
-        <div class="row">
-          <button id="copyLinkedin" class="btn primary">
-            <svg viewBox="0 0 24 24" class="ico"><rect x="9" y="9" width="11" height="11" rx="2" fill="none"/><path d="M5 15V5a2 2 0 0 1 2-2h8" fill="none"/></svg>
-            <span>Copy script</span>
-          </button>
-          <button id="viewLinkedin" class="btn ghost">View</button>
-        </div>
-        <pre id="linkedinCode" class="code" hidden></pre>
-      </div>
-      <div class="card script-card">
-        <div class="row between" style="margin:0">
-          <div>
-            <h3 class="card-title">Naukri auto-apply script</h3>
-            <p class="hint" style="margin:0">Loads each job in a hidden same-origin iframe, fills the apply form from your profile, skips what it can't answer. Single job pages work too.</p>
-          </div>
-          <span class="badge">Naukri</span>
-        </div>
-        <ol class="steps-mini">
-          <li>Open a <a href="https://www.naukri.com/software-engineer-jobs-in-india" target="_blank">Naukri search page</a> and sign in</li>
-          <li>Press <kbd>⌥</kbd><kbd>⌘</kbd><kbd>J</kbd> to open the Console</li>
-          <li>Paste (<kbd>⌘</kbd><kbd>V</kbd>) and press <kbd>Enter</kbd></li>
-        </ol>
-        <p class="hint warn-note">⚠️ Starts as a dry run (fills, submits nothing). Automation is against Naukri's terms — keep volume low or your account can be restricted.</p>
-        <div class="row">
-          <button id="copyNaukri" class="btn primary">
-            <svg viewBox="0 0 24 24" class="ico"><rect x="9" y="9" width="11" height="11" rx="2" fill="none"/><path d="M5 15V5a2 2 0 0 1 2-2h8" fill="none"/></svg>
-            <span>Copy script</span>
-          </button>
-          <button id="viewNaukri" class="btn ghost">View</button>
-        </div>
-        <pre id="naukriCode" class="code" hidden></pre>
       </div>
     </section>
 
@@ -407,14 +341,38 @@
         </div>
       </details>
 
-      <details class="card section">
+      <details class="card section" id="automationPreferences" open>
+        <summary>Application automation preferences</summary>
+        <div class="section-body">
+          <p class="hint">Choose which required controls the assistant may complete. Review the actual employer terms when prompted. Optional marketing stays unchecked.</p>
+          <label><input type="checkbox" id="prefPrivacy" /> Enable required privacy acknowledgments after I review the employer's terms</label>
+          <label><input type="checkbox" id="prefLegal" /> Enable factual legal declarations with reviewed profile facts and approval of the exact statement</label>
+          <label><input type="checkbox" id="prefBackground" /> Enable background-check authorizations with my approval of the specific disclosure</label>
+          <label><input type="checkbox" id="prefSignature" /> Allow my typed signature for an approved, verified declaration</label>
+          <label>Typed signature <input id="typedSignature" type="password" autocomplete="off" maxlength="160" /></label>
+          <label><input type="checkbox" id="removeSignature" /> Remove my stored signature</label>
+          <label><input type="checkbox" id="verifyFacts" /> I verified the date of birth and email in my saved profile</label>
+          <label><input type="checkbox" id="clearVerification" /> Forget my profile fact verification</label>
+          <label><input type="checkbox" id="clearPrivacy" /> Forget remembered inline privacy terms</label>
+          <button id="saveAutomation" class="btn primary">Accept and save these preferences</button>
+          <p id="automationState" class="hint" aria-live="polite"></p>
+        </div>
+      </details>
+      <details class="card section" id="pairingSettings" open>
         <summary><span class="num">⚙️</span>Server</summary>
-        <div class="section-body"><input id="serverUrl" placeholder="http://localhost:8787" /></div>
+        <div class="section-body">
+          <label>Loopback server <input id="serverUrl" placeholder="http://localhost:8787" /></label>
+          <label>Local API token <input id="apiToken" type="password" autocomplete="off" /></label>
+          <p class="hint" id="extensionIdentity"></p>
+          <button id="pairServer" class="btn primary">Pair local server</button>
+        </div>
       </details>
     </section>
   </main>
 
   <div id="toast" role="status"></div>
+  <script src="application-policy.js"></script>
   <script src="sidepanel.js"></script>
+  <script src="application-workflow.js"></script>
 </body>
 </html>

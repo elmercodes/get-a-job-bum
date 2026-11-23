@@ -45,13 +45,15 @@ If a real secret or personal file was ever committed or pushed: **stop publicati
 
 ## 4. Conservative answer policy
 
+The [Phase 1 authorization policy](PHASE_1.md) specifies the bounded positive cases for privacy acknowledgments, legal declarations, background screening, and signatures. The final browser action requires a separate application-specific approval.
+
 **Known field** → approved applicant record and scope match → fill and verify. **Unknown factual/conditional field** → ask user. **Legally binding/sensitive disclosure** → hand off or explicit per-field confirmation, no automatic click. **Prohibited secret field** → do not store/fill/send. No defaults for immigration, relocation, salary, work authorization, criminal history, company relationships, consent, disability or race. Do not deduce identity traits from a résumé.
 
 AI narratives must cite candidate evidence IDs; the model cannot invent hard facts. The reviewer must be able to see source and explanation before approving changes. Have deletion/expiry options for saved answers.
 
 ## 5. Browser site policy
 
-Use manual paste for LinkedIn and Indeed descriptions. Do not implement unauthorized extraction, automated clicking on those websites, scraping hidden APIs or anti-bot bypass. For employer portals, action only after user starts a run, site policy allows it, and technical access permits it. CAPTCHA, login, 2FA, restricted iframe, native file picker and inaccessible controls are user handoffs. No unattended mass applying. Even permitted intermediate automation must never click final Submit.
+Use manual paste for LinkedIn and Indeed descriptions. Do not implement unauthorized extraction, automated clicking on those websites, scraping hidden APIs or anti-bot bypass. For employer portals, action only after user starts a run, site policy allows it, and technical access permits it. CAPTCHA, login, 2FA, restricted iframe, native file picker and inaccessible controls are user handoffs. No unattended mass applying. Intermediate automation ends at review. Assisted final submission requires an explicit one-use approval.
 
 ## 6. AI privacy and costs
 

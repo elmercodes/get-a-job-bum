@@ -46,7 +46,7 @@
     </fieldset>
 
     <label for="start">Earliest start date</label><input id="start" type="date" />
-    <div class="lbl" id="rel-l">Open to relocation</div><div id="rel" role="switch" aria-checked="false" aria-labelledby="rel-l" tabindex="0"></div>
+    <div class="lbl" id="rel-l">Open to mentoring</div><div id="rel" role="switch" aria-checked="false" aria-labelledby="rel-l" tabindex="0"></div>
 
     <!-- A collapsed section whose fields only exist once it's opened. -->
     <h3>Additional information</h3>
@@ -149,7 +149,7 @@
     const find = (re) => fields.find((f) => re.test(f.label));
     const want = {
       country: [/country/i, 'India'], degree: [/highest degree/i, "Bachelor's Degree"], langs: [/languages do you use/i, ['Python', 'Go']],
-      start: [/earliest start/i, '2027-01-04'], reloc: [/relocation/i, true], notice: [/notice period/i, '30'], heard: [/how did you hear/i, 'LinkedIn'],
+      start: [/earliest start/i, '2027-01-04'], reloc: [/mentoring/i, true], notice: [/notice period/i, '30'], heard: [/how did you hear/i, 'LinkedIn'],
       github: [/github/i, 'https://github.com/riya-sample'], team: [/preferred team/i, 'Machine Learning Platform'], portfolio: [/portfolio/i, 'https://riya-sample.dev'],
     };
     const values = {};

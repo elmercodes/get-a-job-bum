@@ -2,17 +2,18 @@
   "manifest_version": 3,
   "name": "Auto Job",
   "version": "0.17.0",
-  "description": "Tailors your resume and fills every page of a job application, even Workday, then stops for your review. Runs on your laptop.",
+  "description": "Review and fill job applications with local applicant data and explicit submission approval.",
   "permissions": [
     "sidePanel",
     "scripting",
     "tabs",
     "storage",
     "contextMenus",
-    "debugger"
+    "activeTab"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -51,5 +52,9 @@
       "description": "Open Auto Job as a sidebar (Chrome, Edge, Brave)"
     }
   },
-  "minimum_chrome_version": "116"
+  "minimum_chrome_version": "116",
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ]
 }

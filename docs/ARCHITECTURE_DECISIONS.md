@@ -22,3 +22,8 @@ Phase 0 decision for developer-first v0.1, pending review. The base is Auto Job 
 ### Rollout
 
 Land the Phase 1 safety and synthetic-browser changes in small commits before adding applicant evidence and document features. Review each milestone against the pinned baseline and the acceptance matrix. For a release rollback, return to the prior safe application build and compatible data snapshot. The upstream baseline is suitable as a comparison target only with fictional data.
+
+
+## ADR 002. Application-specific authority for consent and submission
+
+The owner approved configurable acknowledgments and a separate final submission action for Phase 1. The local server resolves protected answer categories before generic answering and creates exact-evidence permits. The content script rechecks the live field and enforces native submit guards. The backend consumes a durable review once and the extension verifies the resulting receipt. Scope, setup, and limitations are in the [Phase 1 guide](PHASE_1.md).
