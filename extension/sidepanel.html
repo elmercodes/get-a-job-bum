@@ -60,7 +60,7 @@
         </button>
         <div class="toggles">
           <label class="switch"><input type="checkbox" id="autoNext" checked /><span class="track"></span>Auto Next</label>
-          <label class="switch"><input type="checkbox" id="autoCover" checked /><span class="track"></span>Cover letter</label>
+          <label class="switch"><input type="checkbox" id="autoCover" /><span class="track"></span>Cover letter</label>
           <label class="switch"><input type="checkbox" id="onlyEmpty" checked /><span class="track"></span>Only empty</label>
           <label class="switch" title="Adds job keywords you don't have yet to a 'Familiar with / learning' line, so the resume covers 100% of keywords without claiming experience"><input type="checkbox" id="fillGaps" /><span class="track"></span>100% keywords</label>
           <label class="switch" title="After filling each page, takes screenshots and asks Gemini what looks wrong on screen (errors, empty required fields, wrong values), then fixes those fields"><input type="checkbox" id="visualCheck" /><span class="track"></span>👁 Visual check</label>
@@ -143,6 +143,14 @@
         <button id="reviewApplication" class="btn ghost big">Review application</button>
         <button id="submit" class="btn success big" hidden disabled>Approve and submit this application</button>
         <p class="hint">Review the form and unresolved fields before approving submission.</p>
+        <details>
+          <summary>Answer context for this application</summary>
+          <label class="field">Employer <input id="answerEmployer" maxlength="200"></label>
+          <label class="field">Job country <input id="answerCountry" maxlength="200"></label>
+          <label class="field">Employment type <input id="answerWorkType" maxlength="200"></label>
+          <button id="useAnswerContext" class="btn ghost sm">Use this context</button>
+        </details>
+        <div id="missingAnswers"></div>
         <div id="authorizationQueue"></div>
         <div id="applicationAudit" aria-live="polite"></div>
         <div id="submitOut"></div>
@@ -299,7 +307,7 @@
           <svg viewBox="0 0 24 24"><path d="M12 16V4M6 10l6-6 6 6M4 20h16"/></svg>
           <span><b>Choose resume files</b><br><small>PDF / DOCX · pick several versions to merge them</small></span>
         </label>
-        <button id="importResume" class="btn primary">Import resume</button>
+        <button id="importResume" class="btn primary">Extract resume for review</button>
         <div id="profileOut"></div>
       </div>
 
@@ -333,11 +341,47 @@
       </details>
       <button id="saveProfile" class="btn primary block">Save details &amp; answers</button>
 
-      <details class="card section">
-        <summary><span class="num">🧠</span>Remembered answers</summary>
+      <details class="card section" id="evidenceDetails">
+        <summary>Applicant evidence</summary>
         <div class="section-body">
-          <p class="hint">Answers from forms you submitted, reused when the same question comes up.</p>
-          <div id="bank"></div>
+          <p class="hint">Review the facts used in applications. Import a resume above to suggest records for approval.</p>
+          <div class="row">
+            <select id="evidenceKind" aria-label="Record type"></select>
+            <button id="evidenceAdd" class="btn ghost">Add record</button>
+            <button id="evidenceReload" class="btn ghost">Reload</button>
+          </div>
+          <label class="field">Filter records
+            <select id="evidenceFilter">
+              <option value="all">All records</option>
+              <option value="review">Needs review</option>
+              <option value="answer">Reusable answers</option>
+              <option value="employment">Employment</option>
+              <option value="accomplishment">Accomplishments</option>
+              <option value="skill">Skills</option>
+            </select>
+          </label>
+          <p id="evidenceStatus" class="hint" aria-live="polite"></p>
+          <ul id="evidenceRecords"></ul>
+          <div id="evidenceForm" hidden>
+            <h3 id="evidenceFormTitle"></h3>
+            <p id="evidenceReadout" class="hint"></p>
+            <div id="evidenceConflicts"></div>
+            <div id="evidenceFields"></div>
+            <label><input id="replaceEvidence" type="checkbox"> Replace conflicting records I reviewed</label>
+            <div class="row">
+              <button class="btn primary" data-evidence-decision="approve">Approve and save</button>
+              <button class="btn ghost" data-evidence-decision="draft">Save for review</button>
+              <button class="btn ghost" data-evidence-decision="reject" data-existing-evidence>Reject</button>
+              <button class="btn ghost" data-evidence-decision="archive" data-existing-evidence>Archive</button>
+              <button class="btn ghost" data-evidence-decision="delete" data-existing-evidence>Delete</button>
+            </div>
+          </div>
+          <ul id="evidenceSources"></ul>
+          <div class="row">
+            <button id="evidenceExport" class="btn ghost">Export private evidence</button>
+            <button id="evidenceClear" class="btn ghost">Delete applicant evidence</button>
+          </div>
+          <p class="hint">Save private exports outside the Git checkout.</p>
         </div>
       </details>
 
@@ -374,5 +418,6 @@
   <script src="application-policy.js"></script>
   <script src="sidepanel.js"></script>
   <script src="application-workflow.js"></script>
+  <script src="evidence-panel.js"></script>
 </body>
 </html>

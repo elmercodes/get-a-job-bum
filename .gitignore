@@ -59,3 +59,8 @@ server/test/reports/
 # Note: upstream ignores root data/ and server/.env; leave those intact.
 # Do not indiscriminately ignore *.docx or *.pdf: fictional fixture files may be intentional.
 # Instead, never place real applicant documents under a tracked path.
+
+# Default names for private evidence archives exported from the app.
+applicant-evidence*.json
+/profile.json
+/server/profile.json

@@ -1,27 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
-import policy from '../../extension/application-policy.js';
-import { fileURLToPath } from 'node:url';
 
-process.umask(0o077);
+import { DATA_DIR, RESUME_DIR, DOCS_DIR, readJSON as read, writeJSON } from './storage.js';
+import { loadEvidence, updateDocument } from './evidence-store.js';
+import { profileProjection } from './evidence-profile.js';
 
-const legacyRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../data');
-const defaultRoot = process.platform === 'win32'
-  ? path.join(process.env.LOCALAPPDATA || os.homedir(), 'Get a Job Bum')
-  : process.platform === 'darwin'
-    ? path.join(os.homedir(), 'Library', 'Application Support', 'Get a Job Bum')
-    : path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'get-a-job-bum');
-export const DATA_DIR = process.env.AUTOJOB_DATA ? path.resolve(process.env.AUTOJOB_DATA) : defaultRoot;
-if (!process.env.AUTOJOB_DATA && !fs.existsSync(defaultRoot) && fs.existsSync(legacyRoot)) {
-  throw new Error('Legacy data detected. Back it up and copy it into the private application data folder or set AUTOJOB_DATA explicitly.');
-}
-export const RESUME_DIR = path.join(DATA_DIR, 'resumes');
-export const DOCS_DIR = path.join(DATA_DIR, 'documents');
-fs.mkdirSync(RESUME_DIR, { recursive: true, mode: 0o700 });
-fs.mkdirSync(DOCS_DIR, { recursive: true, mode: 0o700 });
-
-const PROFILE = path.join(DATA_DIR, 'profile.json');
+export { DATA_DIR, RESUME_DIR, DOCS_DIR, writeJSON };
 const APPS = path.join(DATA_DIR, 'applications.json');
 
 // Answers to the questions almost every application asks. The user edits these
@@ -92,18 +76,6 @@ export const DEFAULT_PERSONAL = {
   schooling: [], // [{ level, school, board, year, percentage }]
 };
 
-const read = (file, fallback) => {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    return fallback;
-  }
-};
-// Write to a temp file, then rename: a crash mid-write never leaves half a JSON file (read() would return the fallback).
-export const writeJSON = (file, value) => {
-  fs.writeFileSync(`${file}.tmp`, JSON.stringify(value, null, 2), { mode: 0o600 });
-  fs.renameSync(`${file}.tmp`, file);
-};
 const write = writeJSON;
 
 export function backupData() {
@@ -115,16 +87,9 @@ export function backupData() {
 }
 
 export function getProfile() {
-  const p = read(PROFILE, null);
-  if (!p) return null;
-  p.answers = { ...DEFAULT_ANSWERS, ...(p.answers || {}) };
-  p.personal = { ...DEFAULT_PERSONAL, ...(p.personal || {}) };
-  p.documents ||= {};
-  p.answerBank ||= {};
-  return p;
+  const evidence = loadEvidence();
+  return evidence.records.length || Object.keys(evidence.documents).length ? profileProjection(evidence) : null;
 }
-
-export const saveProfile = (profile) => write(PROFILE, profile);
 
 // ---------- application tracker ----------
 // One record per job (matched by URL, else company + title), with a status history.
@@ -227,16 +192,14 @@ export function saveDocument(kind, originalName, buffer) {
   if (old) fs.rmSync(path.join(DOCS_DIR, path.basename(old)), { force: true });
   const name = `${kind}${ext}`;
   fs.writeFileSync(path.join(DOCS_DIR, name), buffer);
-  p.documents[kind] = name;
-  saveProfile(p);
+  updateDocument(kind, name);
   return name;
 }
 export function removeDocument(kind) {
   const p = getProfile();
   if (!p?.documents?.[kind]) return;
   fs.rmSync(path.join(DOCS_DIR, path.basename(p.documents[kind])), { force: true });
-  delete p.documents[kind];
-  saveProfile(p);
+  updateDocument(kind, null);
 }
 
 // ---------- skill-gap journal ----------
@@ -264,27 +227,6 @@ export const bankKey = (label) =>
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 200);
-
-export function rememberAnswers(entries) {
-  const p = getProfile();
-  if (!p) return 0;
-  let n = 0;
-  for (const e of entries || []) {
-    if (policy.classify(e) !== 'ordinary') continue;
-    const key = bankKey(e.label);
-    const value = typeof e.value === 'string' ? e.value.trim() : e.value;
-    // Job-specific prose ("why us?") is not worth remembering verbatim.
-    if (!key || key.length < 3 || value === '' || value == null || (typeof value === 'string' && value.length > 200)) continue;
-    // Answers that depend on the job (its country, pay, the company itself) must be decided fresh every time.
-    if (/sponsor|visa|authori[sz]|work permit|relocat|salary|ctc|compensation|why|this (role|company|position)|cover letter/.test(key)) continue;
-    // Facts that change over time or answers written for one job: always fresh from your profile / the AI.
-    if (/currently (employed|working)|employment status|notice|years? of (experience|exp)|anything else|additional|tell us|describe|explain|certify|agree|declare|used in production/.test(key)) continue;
-    p.answerBank[key] = { value, type: e.type, at: new Date().toISOString() };
-    n++;
-  }
-  saveProfile(p);
-  return n;
-}
 
 // A click lease is consumed before the extension interacts with the employer page.
 // The recorded attempt survives process restarts and ambiguous browser outcomes.

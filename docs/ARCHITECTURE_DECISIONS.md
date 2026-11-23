@@ -27,3 +27,15 @@ Land the Phase 1 safety and synthetic-browser changes in small commits before ad
 ## ADR 002. Application-specific authority for consent and submission
 
 The owner approved configurable acknowledgments and a separate final submission action for Phase 1. The local server resolves protected answer categories before generic answering and creates exact-evidence permits. The content script rechecks the live field and enforces native submit guards. The backend consumes a durable review once and the extension verifies the resulting receipt. Scope, setup, and limitations are in the [Phase 1 guide](PHASE_1.md).
+
+## ADR 003. One reviewed applicant profile
+
+Phase 2 replaces the loose applicant object with a versioned record envelope in the existing private `profile.json`. The Express API remains the single writer. Each mutation has a revision precondition and writes an owner-only temporary file beside the destination before syncing and renaming. The existing profile endpoint returns a compatibility projection from approved records, so the scanner, legal verifier, PDF renderer, and tracker keep their normal interfaces. Tracker, automation settings, and generated files keep their existing domains.
+
+Legacy structured rows migrate to a review queue with stable IDs. Imported facts and recorded answer values are never approved by a migration or parser. A conflicting proposal is stored separately. Explicit approval can replace an identified record atomically. Unknown legacy fields and prohibited identifiers are excluded from the new schema. The migration preserves a reviewable report of omissions and asks users to retain a private copy of any source document they need.
+
+Reuse Auto Job's document validation, Mammoth/PDF text extraction, field mapping, and PDF renderer. Adapt the deterministic parser from Application Assistant's `utils/profile-extraction.ts` at its pinned MIT revision. Its output is evidence for proposals only. Keep the original file as a private immutable source asset and the extractor's recognized facts in the review queue. Future DOCX generation will use stable evidence IDs and the unchanged source. The donor IndexedDB and model architecture add a second authority and stay outside this phase.
+
+Answer lookup uses normalized exact wording and a short set of explicit aliases. Values must match control type, known scope and conditions, and current options. Protected topics remain behind Phase 1 policy. Scoped sensitive preferences can inform a manual answer. No generic model fills or passive answer learning can approve an applicant fact. PDF tailoring ranks and copies approved facts verbatim. The future rewrite engine can consume the same approved-evidence interface and validate each new claim against its specific source.
+
+Use filesystem permissions and a loopback paired API. Keep runtime records outside Git. Full-disk encryption is the practical at-rest protection for v0.1. The app has no independent key vault. Exports and backups are private user-controlled copies.

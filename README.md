@@ -350,6 +350,8 @@ flowchart LR
 
 ## Quick start
 
+Use the [Applicant Evidence Store guide](docs/PHASE_2.md) to create or migrate your profile, review imported facts, and manage reusable answers.
+
 Follow the [Phase 1 setup guide](docs/PHASE_1.md) to install dependencies, load the extension, pair it with the loopback server, and review the application automation preferences.
 
 On a permitted employer site, grant access if needed, open the application, and choose **Fill application**. Review unresolved fields and any document or disclosure prompts. At the final page choose **Review application**, then explicitly approve the specific submission if the panel supports that form.

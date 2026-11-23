@@ -1,6 +1,6 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from subprocess import Popen
+from subprocess import Popen, run
 from urllib.request import Request, urlopen
 from playwright.sync_api import expect, sync_playwright
 import base64, json, os, secrets, shutil, sys, time
@@ -25,6 +25,7 @@ with TemporaryDirectory() as folder, sync_playwright() as playwright:
     sample = Path(repo, 'server', 'test', 'sample.b64').read_text()
     (documents / 'degree.pdf').write_bytes(base64.b64decode(sample))
     profile.write_text(json.dumps(applicant))
+    run(['node', 'server/test/seed-evidence.mjs', str(profile)], cwd=repo, check=True)
     extension = str(Path(repo) / 'extension')
     context = playwright.chromium.launch_persistent_context(
         folder / 'chrome', executable_path=browser, headless=True,

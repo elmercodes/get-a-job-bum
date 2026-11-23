@@ -7,15 +7,20 @@ import multer from 'multer';
 import { localApi } from './local-api.js';
 import { acknowledge, partitionFields, setSettings, settings } from './automation.js';
 import { UploadError, validateUpload } from './uploads.js';
+import { approvedRecords, EvidenceError, matchAnswer, RECORD_FIELDS, STANDARD_KEYS } from './evidence-model.js';
+import { profileProjection, selectEvidence, tailorFromEvidence } from './evidence-profile.js';
+import { clearEvidence, deleteEvidenceRecord, deleteEvidenceSource, evidenceSource, importEvidence,
+  loadEvidence, saveEvidenceRecord, saveLegacyDetails } from './evidence-store.js';
+
 import mammoth from 'mammoth';
 import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import { chatJSON, describeProvider, describeHeavy, geminiStatus, usedFallbackRecently, aiUsage } from './llm.js';
-import { PARSE_SYSTEM, COVER_SYSTEM, EMAIL_SYSTEM, VISION_SYSTEM, UPSKILL_SYSTEM } from './prompts.js';
+import { COVER_SYSTEM, EMAIL_SYSTEM, VISION_SYSTEM, UPSKILL_SYSTEM } from './prompts.js';
 import { cleanJobText } from './guard.js';
 import { atsCheck } from './atscheck.js';
 import { researchCompany, researchFor } from './research.js';
 import { traceOutcomes } from './outcomes.js';
-import { tailorResume, tailorProblems, withoutGradSentences, crisp, cleanRole } from './tailor.js';
+import { crisp, cleanRole, withoutGradSentences } from './tailor.js';
 import { profileSkillsInJD, makeMatcher, norm, TECH_TERMS } from './keywords.js';
 import { listHackathons } from './hackathons.js';
 import { exportWorkbook } from './export.js';
@@ -26,7 +31,7 @@ import { renderResumePDF, renderCoverLetterPDF } from './pdf.js';
 import { answerFields } from './answer.js';
 import { followUpDraft, interviewPrep } from './coach.js';
 import { saveAppExtra, DATA_DIR, writeJSON, backupData, prepareSubmission, authorizeSubmission, settleSubmission } from './store.js';
-import { getProfile, saveProfile, listApplications, upsertApplication, updateApplication, deleteApplication, STATUSES, rememberAnswers, getDocument, saveDocument, removeDocument, DOCUMENT_KINDS, DEFAULT_ANSWERS, RESUME_DIR, recordGaps, listGaps, saveGaps } from './store.js';
+import { getProfile, listApplications, upsertApplication, updateApplication, deleteApplication, STATUSES, getDocument, saveDocument, removeDocument, DOCUMENT_KINDS, RESUME_DIR, recordGaps, listGaps, saveGaps } from './store.js';
 
 const PORT = Number(process.env.PORT || 8787);
 const app = express();
@@ -58,85 +63,74 @@ const route = (fn) => (req, res, next) => fn(req, res).catch(next);
 
 app.get('/api/health', (req, res) => res.json({ ok: true, llm: describeProvider(), heavy: describeHeavy(), resting: geminiStatus(), usingLocalAI: usedFallbackRecently(), gmail: mailEnabled && mailConfigured(), vision: visionEnabled, hasProfile: !!getProfile(), ai: aiUsage() }));
 
-// Upload one or more resume versions (PDF / DOCX / TXT) and merge them into one structured profile.
+// Read supported resume documents locally. The original bytes remain a separate private asset.
 async function resumeText(file) {
-  const name = file.originalname.toLowerCase();
-  if (name.endsWith('.pdf')) return (await pdfParse(file.buffer)).text;
-  if (!name.endsWith('.docx')) return file.buffer.toString('utf8');
-  let text = (await mammoth.extractRawText({ buffer: file.buffer })).value;
-  // "LinkedIn", "GitHub"... are usually hyperlinks; raw text loses the URLs.
-  const html = (await mammoth.convertToHtml({ buffer: file.buffer })).value;
-  const links = [...html.matchAll(/href="([^"]+)"[^>]*>([^<]*)</g)].filter(([, url]) => !url.startsWith('mailto:'));
-  if (links.length) text += `\n\nHYPERLINKS (link text -> URL):\n${links.map(([, url, label]) => `${label || '(icon)'} -> ${url}`).join('\n')}`;
-  return text;
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (ext === '.pdf') return (await pdfParse(file.buffer)).text;
+  if (ext === '.docx') return (await mammoth.extractRawText({ buffer: file.buffer })).value;
+  return file.buffer.toString('utf8');
 }
 
-// Things you corrected by hand (links, CGPA, exact graduation date) win over what the resume files say.
-const titleCase = (s) => String(s || '').toLowerCase().replace(/\b([a-z])/g, (m) => m.toUpperCase());
-function keepManualEdits(parsed, old) {
-  // "AYUSH UPADHYAY" in a resume header would become "AYUSH" in every first-name field.
-  if (parsed.name && parsed.name === parsed.name.toUpperCase()) parsed.name = titleCase(parsed.name);
-  if (!old) return;
-  if (old.name && old.name.toLowerCase() === String(parsed.name).toLowerCase()) parsed.name = old.name;
-  parsed.links ||= {};
-  for (const k of ['linkedin', 'github', 'portfolio']) if (old.links?.[k]) parsed.links[k] = old.links[k];
-  parsed.links.other = [...new Set([...(old.links?.other || []), ...(parsed.links.other || [])])].filter((u) => u !== parsed.links.portfolio);
-  for (const e of parsed.education || []) {
-    const prev = (old.education || []).find((o) => o.school && e.school && o.school.split(',')[0].toLowerCase() === e.school.split(',')[0].toLowerCase());
-    if (!prev) continue;
-    if (prev.gpa && !e.gpa) e.gpa = prev.gpa;
-    if (prev.end && /[a-z]/i.test(prev.end) && String(prev.end).includes(String(e.end))) e.end = prev.end; // "May 2027" over "2027"
-    if (prev.start && !e.start) e.start = prev.start;
-  }
-}
+app.get('/api/evidence', (req, res) => res.json({
+  ...loadEvidence(), fields: RECORD_FIELDS, standardKeys: STANDARD_KEYS,
+}));
+app.get('/api/evidence/export', (req, res) => res.attachment('applicant-evidence.json').json(loadEvidence()));
+app.post('/api/evidence/select', (req, res) => {
+  const limit = req.body?.limit ?? 100;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 500 || typeof req.body?.description !== 'string' ||
+      req.body.description.length > 15000) return res.status(400).json({ error: 'Invalid evidence selection request' });
+  res.json({ records: selectEvidence(loadEvidence(), cleanJobText(req.body.description).text, limit) });
+});
+app.post('/api/evidence/records', (req, res) => res.json(saveEvidenceRecord(req.body || {})));
+app.delete('/api/evidence/records/:id', (req, res) => res.json(deleteEvidenceRecord(req.params.id, req.body?.revision)));
+app.get('/api/evidence/sources/:id', (req, res) => {
+  const { source, filename } = evidenceSource(req.params.id);
+  res.attachment(source.name).type('application/octet-stream').sendFile(filename);
+});
+app.delete('/api/evidence/sources/:id', (req, res) => res.json(deleteEvidenceSource(req.params.id, req.body?.revision)));
+app.delete('/api/evidence', (req, res) => {
+  if (req.body?.confirmed !== true) return res.status(400).json({ error: 'Confirm deletion of the applicant evidence store' });
+  res.json(clearEvidence(req.body.revision));
+});
 
 app.post('/api/profile/import', resumeUpload.array('resume', 4), route(async (req, res) => {
-  if (!req.files?.length) return res.status(400).json({ error: 'No file uploaded' });
-  const seen = new Set();
-  const versions = [];
+  if (!req.files?.length) return res.status(400).json({ error: 'Choose at least one resume document' });
+  const files = [];
   for (const file of req.files) {
     await validateUpload(file, { resume: true });
     const text = await resumeText(file).then((value) => value.trim()).catch(() => {
       throw new UploadError('Could not read the resume document');
     });
-    const key = text.replace(/\s+/g, ' ').slice(0, 4000);
-    if (!text || seen.has(key)) continue;
-    seen.add(key);
-    versions.push({ name: file.originalname, text });
+    if (!text || text.length > 150000) {
+      throw new UploadError('Resume text is empty or too large. Export a text-based resume and try again.');
+    }
+    files.push({ file, text });
   }
-  if (!versions.length) return res.status(400).json({ error: 'Could not read any text from those files (scanned image PDF?)' });
-
-  const sourceText = versions.map((v) => `===== RESUME VERSION: ${v.name} =====\n${v.text}`).join('\n\n');
-  const parsed = await chatJSON(PARSE_SYSTEM, sourceText, { heavy: true });
-  const old = getProfile();
-  keepManualEdits(parsed, old);
-  // Re-importing replaces the resume content but keeps personal details, answers, documents and remembered answers.
-  const profile = { ...parsed, personal: old?.personal, documents: old?.documents, answerBank: old?.answerBank, answers: old?.answers || DEFAULT_ANSWERS, sourceText, sourceFiles: versions.map((v) => v.name) };
-  saveProfile(profile);
-  res.json(profile);
+  if (typeof req.body.revision !== 'string' || !/^\d+$/.test(req.body.revision)) {
+    return res.status(400).json({ error: 'Reload the profile before importing' });
+  }
+  res.json(importEvidence(files, Number(req.body.revision)));
 }));
 
 app.get('/api/profile', (req, res) => res.json(getProfile()));
-
-// "I have this skill": you confirm a job keyword the resume didn't show; it joins your skills for future tailoring.
 app.post('/api/profile/skills', (req, res) => {
-  const p = getProfile();
-  const skill = String(req.body.skill || '').trim().slice(0, 60);
-  if (!p || !skill) return res.status(400).json({ error: 'Nothing to add' });
-  let cat = p.skills.find((x) => x.category === 'Additional skills');
-  if (!cat) p.skills.push((cat = { category: 'Additional skills', items: [] }));
-  if (!cat.items.some((i) => i.toLowerCase() === skill.toLowerCase())) cat.items.push(skill);
-  p.sourceText = `${p.sourceText || ''}\nConfirmed skill: ${skill}`;
-  saveProfile(p);
-  res.json({ ok: true, skill });
+  const { record } = saveEvidenceRecord({
+    revision: loadEvidence().revision, kind: 'skill', data: { name: req.body?.skill, category: 'Additional skills' },
+    decision: 'approve',
+  });
+  res.json({ ok: true, skill: record.data.name });
 });
 app.put('/api/profile', (req, res) => {
-  const b = req.body;
-  if (!b || typeof b !== 'object' || Array.isArray(b) || !Array.isArray(b.skills) || ['experience', 'education', 'projects'].some((k) => k in b && !Array.isArray(b[k]))) return res.status(400).json({ error: 'Not a profile' });
-  saveProfile(b);
+  const profile = req.body;
+  if (!profile || !Array.isArray(profile.skills)) return res.status(400).json({ error: 'Invalid standard profile details' });
+  const read = getProfile();
+  if (read && ['experience', 'education', 'projects', 'skills', 'certifications', 'achievements', 'answerBank'].some((key) =>
+    key in profile && JSON.stringify(profile[key]) !== JSON.stringify(read[key]))) {
+    return res.status(400).json({ error: 'Edit structured facts and remembered answers in Applicant evidence' });
+  }
+  saveLegacyDetails(profile);
   res.json(getProfile());
 });
-
 // Tailor the master resume to one job description and return the PDF.
 app.post('/api/tailor', route(async (req, res) => {
   const profile = getProfile();
@@ -147,16 +141,11 @@ app.post('/api/tailor', route(async (req, res) => {
   if (stripped.length) console.warn('Posting integrity gate removed instruction-shaped lines', { count: stripped.length });
   if (description.trim().length < 80) return res.status(400).json({ error: 'Job description is missing or too short' });
 
-  const { answers, sourceText, ...resume } = profile;
-  const job = { title, company, description };
-  let out = await tailorResume(resume, sourceText || '', job, { fillGaps: !!req.body.fillGaps });
-  // Quality gate: top keywords in the headline/summary, summary shape, real numbers kept.
-  // One fix-up pass with the problems spelled out when it fails (same pattern as the cover letter).
-  const problems = tailorProblems(out, resume);
-  if (problems.length) {
-    const redo = await tailorResume(resume, sourceText || '', job, { fillGaps: !!req.body.fillGaps, fixThese: problems, previous: out.resume }).catch(() => null);
-    if (redo) out = { ...redo, changes: [...redo.changes, `Quality pass (${problems.length}): ${problems.join(' | ')}`] };
+  const evidence = loadEvidence();
+  if (!approvedRecords(evidence).some((record) => record.kind === 'contact' || record.kind === 'employment' || record.kind === 'accomplishment')) {
+    return res.status(409).json({ error: 'Approve applicant facts before generating the PDF' });
   }
+  const out = tailorFromEvidence(evidence, { title, company, description });
   const tailored = out.resume;
   const pdf = await renderResumePDF(tailored);
   // What an ATS parser actually sees: contact details in the text layer, no garbled glyphs, keywords present.
@@ -165,13 +154,14 @@ app.post('/api/tailor', route(async (req, res) => {
   recordGaps({ title, company, covered: out.keywords.covered, missing: out.missingKeywords });
 
   const safe = (s) => s.replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '');
-  const filename = `${safe(resume.name || 'Resume')}_${safe(company || 'Resume')}.pdf`;
+  const filename = `${safe(tailored.name || 'Resume')}_${safe(company || 'Resume')}.pdf`;
   fs.writeFileSync(path.join(RESUME_DIR, `${Date.now()}_${filename}`), pdf);
 
   res.json({
     filename,
     pdfBase64: pdf.toString('base64'),
     resume: tailored,
+    evidenceIds: out.evidenceIds,
     changes: out.changes,
     matchScore: out.matchScore,
     missingKeywords: out.missingKeywords,
@@ -194,6 +184,7 @@ const validField = (f) => f && typeof f.id === 'string' && /^[\w:-]{1,80}$/.test
   !['__proto__', 'constructor', 'prototype'].includes(f.id) &&
   (f.contextUrl === undefined || !!webUrl(f.contextUrl)) &&
   (f.options === undefined || (Array.isArray(f.options) && f.options.length <= 500 && f.options.every((v) => typeof v === 'string'))) &&
+  (f.help === undefined || (typeof f.help === 'string' && f.help.length <= 3000)) &&
   (f.terms === undefined || (typeof f.terms === 'string' && f.terms.length <= 4000)) &&
   (f.links === undefined || (Array.isArray(f.links) && f.links.length <= 12 && f.links.every((v) => typeof v === 'string' && /^https?:\/\//.test(v))));
 app.post('/api/automation/acknowledge', (req, res) => {
@@ -206,20 +197,45 @@ app.post('/api/automation/acknowledge', (req, res) => {
 
 // Apply the authorization policy before rules, memory, repair, or model use.
 app.post('/api/answer', route(async (req, res) => {
-  const profile = getProfile();
-  if (!profile) return res.status(400).json({ error: 'Import your resume first' });
-  const { fields, scope, errors = {} } = req.body || {};
+  const stored = loadEvidence();
+  const profile = profileProjection(stored);
+  const { fields, scope } = req.body || {};
   if (!Array.isArray(fields) || fields.length > 400 || !fields.every(validField)) return res.status(400).json({ error: 'Invalid fields' });
   const { ordinary, decisions, permits, values } = partitionFields(fields, scope, profile);
-  const safeFields = ordinary.map(({ terms, links, incompleteTerms, ...field }) => field);
-  const safeErrors = Object.fromEntries(safeFields.filter((field) => Object.hasOwn(errors || {}, field.id)).map((field) => [field.id, errors[field.id]]));
-  const { sourceText, documents, answerBank, personal, answers, ...resume } = profile;
+  const evidence = approvedRecords(stored);
+  const saved = {};
+  const suggested = {};
+  const conflicts = new Set();
+  const evidenceIds = {};
+  const contextFor = (f) => {
+    const url = webUrl(f.contextUrl || scope?.url);
+    // Context is explicitly supplied for the current application. Posting text
+    // and applicant location do not establish the job's scope.
+    const details = scope?.context;
+    const context = webUrl(scope?.url) && url && new URL(scope.url).origin === new URL(url).origin ? details : null;
+    const verified = Object.fromEntries(['employer', 'country', 'employmentType'].filter((key) =>
+      typeof context?.[key] === 'string' && context[key].length <= 200).map((key) => [key, context[key]]));
+    return { url, ...verified };
+  };
+  for (const f of fields) {
+    const matched = matchAnswer(evidence, f, contextFor(f));
+    if (!matched) continue;
+    if (matched.conflict) { conflicts.add(f.id); continue; }
+    if (decisions[f.id]) suggested[f.id] = matched.value;
+    else {
+      saved[f.id] = matched.value;
+      evidenceIds[f.id] = [matched.id];
+    }
+  }
+  const safeFields = ordinary.filter((f) => !Object.hasOwn(saved, f.id) && !conflicts.has(f.id))
+    .map(({ terms, links, incompleteTerms, ...field }) => field);
   const job = req.body.job ? { ...req.body.job, description: cleanJobText(req.body.job.description).text } : undefined;
-  const result = await answerFields({
-    fields: safeFields, profile: { ...resume, answerBank, personal, answers }, job,
-    coverLetter: req.body.coverLetter, errors: safeErrors, pageErrors: [],
-  });
-  res.json({ ...result, values: { ...result.values, ...values }, decisions, permits });
+  const result = await answerFields({ fields: safeFields, profile, job, evidenceOnly: true });
+  for (const [id, ids] of Object.entries(result.evidenceIds || {})) evidenceIds[id] = ids;
+  const source = { ...result.source, ...Object.fromEntries(Object.keys(saved).map((id) => [id, 'approved-answer'])) };
+  const needsReview = [...new Set([...result.needsReview, ...conflicts, ...fields.filter((f) => !f.filled && f.required &&
+    !Object.hasOwn(values, f.id) && !Object.hasOwn(saved, f.id) && !Object.hasOwn(result.values, f.id)).map((f) => f.id)])];
+  res.json({ values: { ...result.values, ...saved, ...values }, decisions, permits, needsReview, source, evidenceIds, suggested });
 }));
 
 const STOCK = /I am (writing|applying)|validates? my|my capacity|leverag\w+|proves? my (ability|capability)|demonstrates? my|showcas\w+|my technical foundation|beyond these tools|passionate|excited|thrilled|perfect fit|I believe|I am confident|dream job|esteemed|leverage my|hit the ground running|from day one/gi;
@@ -253,7 +269,9 @@ app.post('/api/cover-letter', route(async (req, res) => {
   const { sourceText, answerBank, documents, personal, ...rest } = profile;
   const keywords = [...new Set([...(req.body.keywords || []), ...profileSkillsInJD(rest, description)])].slice(0, 16);
   const companyFacts = researchFor({ company, title });
-  const input = { PROFILE: rest, KEYWORDS_TO_USE: keywords, JOB: { title: cleanRole(title) || title, postedTitle: title, company, location, description: description.slice(0, 12000) }, ...(companyFacts ? { COMPANY_FACTS: companyFacts } : {}) };
+  const evidence = selectEvidence(loadEvidence(), description, 40).map(({ id, kind, data }) => ({ id, kind, data }));
+  const approvedKeywords = makeMatcher(JSON.stringify(evidence));
+  const input = { PROFILE: { headline: rest.headline, evidence }, KEYWORDS_TO_USE: keywords.filter(approvedKeywords), JOB: { title: cleanRole(title) || title, postedTitle: title, company, location, description: description.slice(0, 12000) }, ...(companyFacts ? { COMPANY_FACTS: companyFacts } : {}) };
   let out = await chatJSON(COVER_SYSTEM, JSON.stringify(input), { temperature: 0.5, heavy: true });
   // Quality gate: length, four paragraphs, no stock phrases. One rewrite with the problems spelled out.
   const problems = coverProblems(String(out.text || ''));
@@ -306,7 +324,7 @@ app.post('/api/vision', route(async (req, res) => {
   res.json({ problems, summary: String(out.summary || '') });
 }));
 
-app.post('/api/answer-bank', (req, res) => res.json({ saved: rememberAnswers(req.body.entries) }));
+app.post('/api/answer-bank', (req, res) => res.status(410).json({ error: 'Approve individual reusable answers in Applicant evidence' }));
 
 // Apply by email: draft (AI) → you review/edit in the panel → send (only on your confirm).
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i;
@@ -581,6 +599,7 @@ app.delete('/api/applications/:id', (req, res) => {
 
 app.use((error, req, res, next) => {
   if (res.headersSent) return next(error);
+  if (error instanceof EvidenceError) return res.status(error.status).json({ error: error.message });
   if (error instanceof UploadError) return res.status(400).json({ error: error.message });
   if (error instanceof multer.MulterError) {
     return res.status(error.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: 'Upload exceeds the permitted size or file count' });

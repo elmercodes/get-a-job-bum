@@ -29,13 +29,18 @@ function scopeFor(tab) {
   if (state.workflow?.tabId !== tab.id || state.workflow.origin !== origin) {
     state.workflow = { id: crypto.randomUUID(), tabId: tab.id, origin, activity: [], attachments: new Map() };
     $('#authorizationQueue').replaceChildren();
+    $('#missingAnswers').replaceChildren();
     $('#applicationAudit').replaceChildren();
   }
   if (state.workflow.url !== tab.url) {
     state.workflow.url = tab.url;
     $('#authorizationQueue').replaceChildren();
+    $('#missingAnswers').replaceChildren();
   }
-  return { run: state.workflow.id, url: tab.url };
+  const context = state.answerContext;
+  return { run: state.workflow.id, url: tab.url,
+    ...(context?.tabId === tab.id && context.url === tab.url ? { context: context.values } : {}),
+  };
 }
 
 function attachmentApproved(tab, field, doc) {
@@ -161,7 +166,6 @@ async function submit() {
   const tab = await activeTab();
   if (tab.id !== pending.tabId || tab.url !== pending.review.url) throw new Error('The application changed. Review it again.');
   const endpoint = '/api/submissions/' + pending.id;
-  await remember(tab.id);
   const approval = await api(endpoint + '/authorize', { method: 'POST', body: { ...pending.review, confirmed: true } });
   const result = await chrome.scripting.executeScript({
     target: { tabId: tab.id, documentIds: [pending.documentId] },
@@ -178,8 +182,6 @@ async function submit() {
     receipt = await callFrame(tab.id, 0, 'submissionReceipt').catch(() => null);
   }
   await api(endpoint + '/result', { method: 'POST', body: { clicked: !!result?.ok || !!receipt, receipt } });
-  if (receipt) await commitMemory();
-  else state.pendingMemory = [];
   $('#submitOut').textContent = receipt ? 'Submission verified by the employer confirmation page.'
     : 'Submission unverified. Check the employer portal and confirm the result from Tracker. The assistant will not retry this application.';
   await loadTracker();

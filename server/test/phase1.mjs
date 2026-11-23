@@ -33,12 +33,15 @@ const restricted = { id: 'private', type: 'text', label: 'Social security number
 const fields = [privacy, legal, background, signature, marketing, ambiguous, unsupported, restricted];
 const answers = (set = fields, useScope = scope) => request('/answer', 'POST', { fields: set, scope: useScope });
 const approve = (field, expected = 200) => request('/automation/acknowledge', 'POST', { field, scope }, expected);
+const updateProfile = async (value) => request('/profile', 'PUT', {
+  ...value, evidenceRevision: (await request('/profile')).evidenceRevision,
+});
 const before = await request('/profile');
 try {
   assert.equal((await answers()).decisions.privacy.state, 'manual');
   await approve(privacy, 409);
   const fictional = { ...before, personal: { ...before.personal, dateOfBirth: '1990-01-01' } };
-  await request('/profile', 'PUT', fictional);
+  await updateProfile(fictional);
   await request('/automation/settings', 'PUT', {
     preferences: { privacy: true, legal: true, background: true, signature: true },
     signature: 'Fictional Applicant', verifyProfile: true,
@@ -63,15 +66,15 @@ try {
   const other = { run: randomUUID(), url: 'https://other.example.test/jobs/fictional' };
   assert.deepEqual((await answers([{ ...privacy, contextUrl: other.url }], other)).values, {});
   assert.deepEqual((await answers([{ ...privacy, contextUrl: nextJob.url, terms: 'We retain materials beyond the original period.' }], nextJob)).values, {});
-  await request('/profile', 'PUT', { ...fictional, personal: { ...fictional.personal, dateOfBirth: '2020-01-01' } });
+  await updateProfile({ ...fictional, personal: { ...fictional.personal, dateOfBirth: '2020-01-01' } });
   const contradictory = await answers();
   assert.equal(contradictory.decisions.legal.state, 'manual');
   assert.equal(contradictory.decisions.signature.state, 'manual');
   await approve(unsupported, 409);
-  await request('/profile', 'PUT', { ...fictional, personal: { ...fictional.personal, dateOfBirth: '' } });
+  await updateProfile({ ...fictional, personal: { ...fictional.personal, dateOfBirth: '' } });
   await approve(legal, 409);
 } finally {
-  await request('/profile', 'PUT', before);
+  await updateProfile(before);
   await request('/automation/settings', 'PUT', { preferences: {}, removeSignature: true, clearVerification: true });
 }
 

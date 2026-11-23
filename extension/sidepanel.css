@@ -576,3 +576,7 @@ button.mini { font-size: 12px; padding: 2px 8px; margin-left: 4px; }
 #hackTheme { max-width: 150px; }
 
 #submit[hidden] { display: none; }
+
+#evidenceForm[hidden], #evidenceForm button[hidden] { display: none; }
+#evidenceConflicts pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+#evidenceRecords, #evidenceSources { padding-left: 20px; }

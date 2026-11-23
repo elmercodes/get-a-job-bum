@@ -52,6 +52,20 @@ export function aiUsage() {
   if (usage.day !== new Date().toDateString()) Object.assign(usage, { day: new Date().toDateString(), calls: 0, failed: 0 });
   return { calls: usage.calls, failed: usage.failed };
 }
+function requireProviderAuthorization(name) {
+  if (name === 'ollama') {
+    const url = new URL(process.env.OLLAMA_URL || 'http://localhost:11434');
+    if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || !['http:', 'https:'].includes(url.protocol) ||
+        url.username || url.password) throw new Error('Ollama must use a loopback URL');
+    return;
+  }
+  if (!['anthropic', 'gemini', 'openai'].includes(name) && !Object.hasOwn(COMPAT_PROVIDERS, name)) {
+    throw new Error('Unknown model provider');
+  }
+  const allowed = (process.env.AUTOJOB_AUTHORIZED_PROVIDERS || '').split(',').map((value) => value.trim().toLowerCase());
+  if (!allowed.includes(name)) throw new Error('Authorize this cloud provider in your private server configuration first');
+}
+
 export async function chatJSON(system, user, { temperature = 0.2, heavy = false, budgetMs, images = [], search = false } = {}) {
   try {
     return await primaryJSON(system, user, { temperature, heavy, budgetMs, images, search });
@@ -71,20 +85,21 @@ async function fallbackJSON(system, user, temperature, primaryError) {
   if (!names.length) return undefined;
   let lastError;
   for (const name of names) {
+    try { requireProviderAuthorization(name); } catch { continue; }
     const cfg = compatCfg(name);
     if (!cfg) { lastError = new Error(`unknown fallback provider "${name}"`); continue; }
     if (!cfg.key) { lastError = new Error(`${name}: ${COMPAT_PROVIDERS[name].key} is not set in server/.env`); continue; }
     try {
       const text = await openaiCompatible(system, user, temperature, cfg.model, cfg);
-      console.warn(`Primary AI failed (${String(primaryError?.message || '').slice(0, 80)}); used fallback provider "${name}" (${cfg.model})`);
+      console.warn('Configured model request unavailable');
       lastFallbackAt = Date.now();
       return parseJSON(text);
     } catch (err) {
       lastError = err;
-      console.warn(`Fallback provider "${name}" failed: ${String(err.message).slice(0, 100)}`);
+      console.warn('Configured model request unavailable');
     }
   }
-  console.warn(`All fallback providers failed; last error: ${String(lastError?.message).slice(0, 120)}`);
+      console.warn('Configured model request unavailable');
   return undefined;
 }
 
@@ -92,6 +107,7 @@ async function primaryJSON(system, user, { temperature, heavy, budgetMs, images,
   const p = provider();
   // A stronger, separate model for quality-critical calls, when HEAVY_LLM_PROVIDER is configured.
   const heavyProvider = heavy && !images.length && !search ? (process.env.HEAVY_LLM_PROVIDER || '').toLowerCase() : '';
+  requireProviderAuthorization(heavyProvider || p);
   if (heavyProvider && heavyProvider !== p) {
     if (heavyProvider === 'gemini') return parseJSON((await gemini(system, user, temperature, true, budgetMs ?? 150000)).text);
     if (heavyProvider === 'ollama') return parseJSON(await ollama(system, user, temperature, process.env.OLLAMA_HEAVY_MODEL));
@@ -113,7 +129,7 @@ async function primaryJSON(system, user, { temperature, heavy, budgetMs, images,
     } catch (e) {
       // Free Gemini quota gone or every model overloaded: use the local Ollama model if it's running.
       if (images.length || process.env.OLLAMA_FALLBACK === 'off' || !(await ollamaUp())) throw e;
-      console.warn(`Gemini unavailable (${String(e.message).slice(0, 80)}); using local Ollama instead`);
+      console.warn('Configured model request unavailable');
       lastFallbackAt = Date.now();
       text = await ollama(system, user, temperature);
     }
@@ -161,7 +177,7 @@ async function gemini(system, user, temperature, heavy, budgetMs, images = [], s
     let res;
     try {
       res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-        method: 'POST',
+        method: 'POST', redirect: 'error',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
         signal: AbortSignal.timeout(timeoutMs),
         body: JSON.stringify({
@@ -216,14 +232,16 @@ function msUntilPacificMidnight() {
 let lastFallbackAt = 0;
 export const usedFallbackRecently = () => Date.now() - lastFallbackAt < 10 * 60_000;
 async function ollamaUp() {
+  requireProviderAuthorization('ollama');
   const base = process.env.OLLAMA_URL || 'http://localhost:11434';
-  return fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(1500) }).then((r) => r.ok).catch(() => false);
+  return fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(1500), redirect: 'error' }).then((r) => r.ok).catch(() => false);
 }
 
 async function ollama(system, user, temperature, model) {
+  requireProviderAuthorization('ollama');
   const base = process.env.OLLAMA_URL || 'http://localhost:11434';
   const res = await fetch(`${base}/api/chat`, {
-    method: 'POST',
+    method: 'POST', redirect: 'error',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: model || process.env.OLLAMA_MODEL || 'qwen3.5:9b', // also used as the fallback when the provider is Gemini
@@ -247,7 +265,7 @@ async function openaiCompatible(system, user, temperature, model, cfg) {
   if (cfg && !cfg.model) throw new Error(`${cfg.base}: no model configured (set its *_MODEL in server/.env)`);
   const base = cfg?.base || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
   const res = await fetch(`${base}/chat/completions`, {
-    method: 'POST',
+    method: 'POST', redirect: 'error',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${cfg ? cfg.key : process.env.OPENAI_API_KEY || ''}`,
@@ -269,7 +287,7 @@ async function openaiCompatible(system, user, temperature, model, cfg) {
 
 async function anthropic(system, user, temperature, model) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
+    method: 'POST', redirect: 'error',
     headers: {
       'Content-Type': 'application/json',
       'x-api-key': process.env.ANTHROPIC_API_KEY || '',

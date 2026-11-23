@@ -6,8 +6,8 @@ import { researchFor } from './research.js';
 
 const POSTGRAD_TEXT = /post\s*-?\s*graduat\w*\s*(year|date|passing)|year\s*of\s*post\s*-?\s*graduat/i;
 const TEXTLIKE = ['text', 'email', 'tel', 'url', 'search', 'date', 'number', 'combobox', 'tags', ''];
-const first = (p) => p.name.split(/\s+/)[0];
-const last = (p) => p.name.split(/\s+/).slice(1).join(' ');
+const first = (p) => p.personal?.firstName || (p.name || '').split(/\s+/)[0];
+const last = (p) => p.personal?.lastName || (p.name || '').split(/\s+/).slice(1).join(' ');
 const LINK_LABEL = /portfolio|personal\s*(web)?site|^website|^url\b|other\s*(website|url|link)|your\s*website|work\s*links?|^(other\s*)?links?\b|profile\s*links?|social\s*(links?|profiles?)/i;
 // Degree lists rarely have your exact degree ("B.Tech" in a list with only "Bachelor of Engineering", "Bachelors"…):
 // try the closest equivalents in order. Education-level lists get the level ("Bachelor's degree", "Undergraduate").
@@ -323,6 +323,33 @@ function degreeOption(options, degree) {
   return prefix?.[0];
 }
 
+// An option can express a broader tier, but it cannot change the qualification.
+const EDUCATION_TIERS = [
+  /high school|secondary school|ged/i,
+  /associate|a\.?s\.? degree/i,
+  /bachelor|undergraduate|b\.?\s*(?:tech|sc|eng)\b|b\.[aes]\b/i,
+  /master|postgraduate|mba|m\.?\s*(?:tech|sc|eng)\b|m\.[as]\b/i,
+  /doctor|ph\.?\s*d\b|dphil/i,
+];
+
+function verifiedDegree(field, profile, label) {
+  const tier = (value) => EDUCATION_TIERS.findIndex((marker) => marker.test(value || ''));
+  const education = profile.education.filter((entry) => entry.degree);
+  const degree = /highest/i.test(label)
+    ? [...education].sort((a, b) => tier(b.degree) - tier(a.degree))[0]?.degree
+    : education[(field.entry || 1) - 1]?.degree;
+  if (!degree) return undefined;
+  const options = field.options;
+  if (!options?.length) return degree;
+  const exact = options.find((option) => normT(option) === normT(degree));
+  if (exact) return exact;
+  const level = tier(degree);
+  if (level < 0) return undefined;
+  const sameLevel = options.filter((option) => tier(option) === level);
+  if (level === 2) return degreeOption(sameLevel, degree);
+  return sameLevel.length === 1 ? sameLevel[0] : undefined;
+}
+
 // Work Experience #n fields come straight from your profile's n-th role (most recent first), not from the AI.
 const EXP_SECTION = /experience|employment|work history|positions?|jobs?/i;
 const isPresent = (end) => /present|current|now|ongoing/i.test(String(end || ''));
@@ -508,18 +535,51 @@ function assignRoles(fields, profile) {
   return fields.map((f) => (byKey.has(`${f.section}#${f.entry}`) ? { ...f, roleIndex: byKey.get(`${f.section}#${f.entry}`) } : f));
 }
 
-export async function answerFields({ fields, profile, job, coverLetter, errors = {}, pageErrors = [] }) {
+export async function answerFields({ fields, profile, job, coverLetter, errors = {}, pageErrors = [], evidenceOnly = false }) {
   fields = assignRoles(fields, profile);
   const values = {};
   const source = {};
   const pending = [];
+  const blank = { name: '', email: '', phone: '', location: '', headline: '', summary: '', personal: {}, answers: {}, links: {}, skills: [], experience: [], education: [], projects: [] };
   const consentIds = [];
   const { answerBank = {}, documents, answers, personal, sourceText, sourceFiles, ...forModel } = profile;
   for (const f of fields) {
     if (f.type === 'file') continue;
     if (f.roleIndex === -1) continue; // an extra work entry: keep what the site has, never let the AI invent a role
     const err = errors[f.id];
-    let v = err ? quickFix(f, err) : ruleValue(f, profile, job);
+    let v = err && !evidenceOnly ? quickFix(f, err) : ruleValue(f, profile, job);
+    if (evidenceOnly) {
+      // Some inherited rules have generic defaults. Suppress values that could
+      // have been produced with no applicant facts.
+      if (JSON.stringify(v) === JSON.stringify(ruleValue(f, blank, job))) v = undefined;
+      if (/^(?:current (?:company|employer|organi[sz]ation)(?: name)?)$/i.test(f.label.trim())) {
+        const current = (profile.experience || []).filter((role) => /^(?:present|current|ongoing)$/i.test(role.end || ''));
+        v = current.length === 1 ? current[0].company : undefined;
+      }
+      const label = clean(String(f.label).split('›').pop());
+      if (/^code$|country\s*(?:phone\s*)?code|dial(?:l)?ing\s*code|isd/i.test(label)) {
+        const code = profile.phone.match(/^\+\d{1,3}(?=[\s-])/i)?.[0];
+        v = code ? (f.options?.length ? f.options.find((item) => item.includes(code)) : code) : undefined;
+      }
+      if (HEAR_LABEL.test(label)) {
+        const approved = profile.answers.howDidYouHear;
+        v = approved ? (f.options?.length ? f.options.find((item) => normT(item) === normT(approved)) : approved) : undefined;
+      }
+      if (/fluent in this language/i.test(label) || (LANG_LEVEL.test(label) && /language/i.test(f.section || f.label))) {
+        const level = profile.languageEvidence?.[(f.entry || 1) - 1]?.proficiency;
+        v = level && f.type !== 'checkbox' ? (f.options?.length ? f.options.find((item) => normT(item) === normT(level)) : level) : undefined;
+      }
+      if (DEGREE_LABEL.test(label) || LEVEL_LABEL.test(label)) v = verifiedDegree(f, profile, label);
+      if (/years? of .*experience|how many years.*experience|years? of experience/i.test(label) && !/^years? of (?:professional |total )?experience[\s*?]*$/i.test(label)) {
+        v = undefined; // Tool- or domain-specific years require an approved scoped answer.
+      }
+      if (/^(?:preferred|chosen|display) (?:first )?name$/i.test(label)) v = profile.personal?.preferredName;
+      if (v !== undefined && v !== null && v !== '') {
+        values[f.id] = v;
+        source[f.id] = 'profile';
+      } else if (f.required && !f.filled) pending.push(f);
+      continue;
+    }
     if (err && v !== undefined) source[f.id] = 'auto-fix';
     if (v === undefined && !err && f.type === 'checkbox' && /\bfresher\b|no (prior|work) experience|i have no experience/i.test(f.label)) v = fresher(profile);
     // "I have a preferred name" (Eightfold legal-name section): you don't, so the box stays unticked.
@@ -536,6 +596,7 @@ export async function answerFields({ fields, profile, job, coverLetter, errors =
     else pending.push(f);
   }
 
+  if (evidenceOnly) return { values, source, needsReview: pending.map((field) => field.id) };
   let needsReview = [];
   if (pending.length) {
     const user = JSON.stringify({

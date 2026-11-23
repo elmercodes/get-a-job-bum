@@ -511,7 +511,7 @@ async function fillPage(pageNo = 1) {
     const cover = wantsCoverText ? await ensureCover() : state.cover?.key === jobKey() ? state.cover : null;
 
     const scope = scopeFor(tab);
-    const { values, needsReview, source, aiError, decisions = {}, permits = {} } = fields.length
+    const { values, needsReview, source, aiError, decisions = {}, permits = {}, suggested = {} } = fields.length
       ? await api('/api/answer', { method: 'POST', body: { fields, scope, job: currentJob(), coverLetter: cover?.text } })
       : { values: {}, needsReview: [], source: {} };
     if (aiError) progress(`AI unavailable (${aiError.slice(0, 60)}): filled what your profile knows, please fill the rest`, 'bad');
@@ -540,18 +540,24 @@ async function fillPage(pageNo = 1) {
       const status = results[f.id];
       if (decisions[f.id]) {
         noteAuthorization(f, decisions[f.id], scope, status);
+        if (decisions[f.id].category === 'sensitive' && f.required && !f.filled) showMissingAnswer(tab, f, scope, suggested[f.id], decisions[f.id]);
         if (f.required && !f.filled && status !== 'filled') missingRequired.push('Required ' + decisions[f.id].category + ' field');
         continue;
       }
       const empty = v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length); // null: left empty on purpose
-      if (empty && f.required) missingRequired.push(f.label);
+      if (empty && f.required && !f.filled) {
+        missingRequired.push(f.label);
+        showMissingAnswer(tab, f, scope);
+      } else if (status === 'filled') {
+        [...$('#missingAnswers').children].find((item) => item.dataset.field === f.id)?.remove();
+      }
       if (!empty && status && status !== 'filled') failed.push({ key: f.id, label: f.label, value: Array.isArray(v) ? v.join(', ') : String(v), error: status, required: f.required });
       const tag =
         status && status !== 'filled' ? `<span class="tag err">${esc(status)}</span>`
         : needsReview.includes(f.id) ? '<span class="tag review">check</span>'
         : !empty ? '<span class="tag done">filled</span>'
         : `<span class="tag review">${f.required ? 'required: fill it' : 'left empty'}</span>`;
-      const src = source?.[f.id] ? `<span class="src">${{ profile: 'from profile', memory: 'remembered', ai: 'AI', 'cover-letter': 'cover letter' }[source[f.id]] || ''}</span>` : '';
+      const src = source?.[f.id] ? `<span class="src">${{ profile: 'from profile', memory: 'remembered', ai: 'AI', 'cover-letter': 'cover letter' }[source[f.id]] || (source[f.id] === 'approved-answer' ? 'approved answer' : '')}</span>` : '';
       const cls = (status && status !== 'filled') || (empty && f.required) ? 'bad' : needsReview.includes(f.id) || empty ? 'warn' : '';
       rows.push(`<div class="item ${cls}" style="--i:${rows.length}"><div class="q">${esc(starless(f.label).slice(0, 120))}${f.required ? ' *' : ''} ${tag}${src}</div><div class="v">${esc(Array.isArray(v) ? v.join(', ') : typeof v === 'boolean' ? (v ? 'Yes' : 'No') : v ?? '')}</div></div>`);
     }
@@ -1034,9 +1040,13 @@ async function runPages() {
   if (state.fillActive) throw new Error('An application is already filling');
   state.fillActive = true;
   state.fillStopped = false;
+  const buttons = [$('#fill'), $('#continue')];
+  const original = buttons.map((button) => button.disabled);
+  for (const button of buttons) button.disabled = true;
   try {
     return await fillSteps();
   } finally {
+    buttons.forEach((button, index) => { button.disabled = original[index]; });
     state.fillActive = false;
     state.fillTab = null;
   }
@@ -1077,7 +1087,7 @@ async function fillSteps() {
       setStep('review');
       if (r.submit) $('#reviewApplication').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       $('#submitOut').innerHTML = r.submit
-        ? `<p><b>Review the highlighted fields</b>, fix anything, then choose Review application before approving “${esc(r.submit)}”).</p>`
+        ? `<p><b>Review the highlighted fields</b>, fix anything, then choose Review application before approving “${esc(r.submit)}”.</p>`
         : `<p class="hint">${r.next ? `Click “${esc(r.next)}” yourself or turn on auto-click Next.` : 'No Next or Submit button found on this page.'}</p>`;
       return r.submit ? 'final' : 'done';
     }
@@ -1089,7 +1099,6 @@ async function fillSteps() {
       if (!(await repairPage(tab, errs, [], page)).fixed) break;
     }
     await checkPage(tab, page);
-    await remember(tab.id);
     const clickNextAndWait = async () => {
       checkFill(tab);
       const before = await pageKeys(tab.id);
@@ -1132,19 +1141,6 @@ async function fillSteps() {
   return 'too-many';
 }
 
-// Answers are collected page by page, but only saved to memory when you actually submit
-// (i.e. after you reviewed them), so an AI guess on an unreviewed page is never remembered.
-state.pendingMemory = [];
-async function remember(tabId) {
-  const snaps = (await callAll(tabId, 'snapshot').catch(() => [])).flatMap((f) => f.result);
-  state.pendingMemory.push(...snaps);
-}
-async function commitMemory() {
-  const entries = state.pendingMemory;
-  state.pendingMemory = [];
-  if (entries.length) await api('/api/answer-bank', { method: 'POST', body: { entries } }).catch(() => {});
-}
-
 // On a job page, press Apply (several hops on boards: board → countdown page → company site → form) until the form shows.
 async function openApplication(tab) {
   // Job boards often need several "Apply" hops (board → countdown page → company careers page → form).
@@ -1175,7 +1171,6 @@ async function runAll() {
   let tab = await activeTab();
   state.log = [];
   state.startedAt = Date.now() - 2 * 60_000;
-  state.pendingMemory = [];
   resetSteps();
   setStep('job');
   $('#progress').innerHTML = '';
@@ -1415,7 +1410,9 @@ const inputsFor = (labels, values, group) =>
 function renderProfile(p) {
   state.profile = p;
   if (!p) {
-    $('#profileOut').innerHTML = '<p class="hint">No resume imported yet.</p>';
+    $('#profileOut').innerHTML = '<p class="hint">Add contact details or review an imported resume in Applicant evidence.</p>';
+    $('#personal').replaceChildren();
+    $('#answers').replaceChildren();
     return;
   }
   const docs = Object.keys(p.documents || {});
@@ -1434,10 +1431,7 @@ function renderProfile(p) {
   if (!$('#jobFilter').value && p.answers?.targetRoles) {
     $('#jobFilter').placeholder = 'Filter titles (empty = show all), e.g. engineer, ml, data, sde';
   }
-  const bank = Object.entries(p.answerBank || {});
-  $('#bank').innerHTML = bank.length
-    ? bank.map(([k, v]) => `<div class="bank"><span>${esc(k)} → <b>${esc(v.value)}</b></span><button data-forget="${esc(k)}">forget</button></div>`).join('')
-    : '<p class="hint">Nothing yet.</p>';
+
 }
 
 async function importResume() {
@@ -1445,8 +1439,18 @@ async function importResume() {
   if (!files.length) throw new Error('Choose your resume file(s) first');
   const fd = new FormData();
   files.forEach((f) => fd.append('resume', f));
-  renderProfile(await api('/api/profile/import', { method: 'POST', body: fd }));
-  toast('Resume imported. Check your details below.');
+  await loadEvidencePanel();
+  fd.append('revision', String(evidenceView.revision));
+  const { state: imported, stats } = await api('/api/profile/import', { method: 'POST', body: fd });
+  updateEvidenceView(imported);
+  $('#evidenceDetails').open = true;
+  $('#evidenceFilter').value = 'review';
+  renderEvidence();
+  $('#evidenceStatus').textContent += ' · ' + stats.proposals + ' proposed, ' + stats.conflicts + ' conflicts, ' +
+    stats.incomplete + ' incomplete or unsupported. View the original to review omitted details.';
+  $('#resumeFile').value = '';
+  renderProfile(await api('/api/profile'));
+  toast('Resume extracted locally. Approve individual facts in Applicant evidence.');
 }
 
 async function saveProfile() {
@@ -2004,7 +2008,6 @@ on('#fill', async () => {
   if (state.fillActive) throw new Error('An application is already filling');
   state.log = [];
   state.workflow = null;
-  state.pendingMemory = [];
   document.querySelector('.submit-card').hidden = false;
   state.startedAt ||= Date.now() - 10 * 60_000;
   await runPages();
@@ -2291,13 +2294,7 @@ $('#fillOut').addEventListener('click', async (e) => {
   toast(`Code ${code} copied`);
 });
 
-$('#bank').addEventListener('click', async (e) => {
-  const key = e.target.dataset.forget;
-  if (!key) return;
-  const p = await api('/api/profile');
-  delete p.answerBank[key];
-  renderProfile(await api('/api/profile', { method: 'PUT', body: p }));
-});
+
 
 // 🎓 Learning plan for the top skill gaps (button is re-rendered, so the listener is delegated on document).
 document.addEventListener('click', async (e) => {

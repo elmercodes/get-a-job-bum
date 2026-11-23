@@ -20,6 +20,7 @@ if [[ -z "${CHROME:-}" ]]; then CHROME=$(command -v google-chrome); fi
 export CHROME
 mkdir -m 700 "$AUTOJOB_DATA"
 cp test/fixtures/*.json "$AUTOJOB_DATA/"
+node test/seed-evidence.mjs "$AUTOJOB_DATA/profile.json"
 env -i PATH="$PATH" CI=true AUTOJOB_TOKEN="$AUTOJOB_TOKEN" AUTOJOB_TEST=1 AUTOJOB_DATA="$AUTOJOB_DATA" \
   PORT="$phase1_port" DOTENV_CONFIG_PATH="$phase1_temp/missing.env" \
   LLM_PROVIDER=ollama OLLAMA_URL=http://127.0.0.1:9 OLLAMA_FALLBACK=off node src/index.js >"$phase1_temp/server.log" 2>&1 &
