@@ -1,0 +1,32 @@
+{
+  "_notice": "FICTIONAL PUBLIC TEST DATA ONLY. Never replace with real personal information in a tracked file.",
+  "profile_id": "demo-0001",
+  "display_name": "Jordan Example",
+  "email": "jordan@example.invalid",
+  "phone": "+1-555-0100",
+  "location": "Example City, EX",
+  "reviewed": true,
+  "work_authorization": null,
+  "relocation_preference": null,
+  "salary_expectation": null,
+  "experiences": [
+    {
+      "experience_id": "exp-demo-1",
+      "company": "Fictional Manufacturing Co.",
+      "title": "Operations Assistant",
+      "start_date": "2023-01",
+      "end_date": "2025-06",
+      "achievements": [
+        {
+          "achievement_id": "ach-demo-1",
+          "text": "Built a spreadsheet-based intake tracker that reduced duplicated internal requests in a fictional pilot project.",
+          "metrics": [],
+          "skills": ["Spreadsheets", "Process improvement"],
+          "status": "self_attested",
+          "source_id": "user-fake-demo"
+        }
+      ]
+    }
+  ],
+  "answer_bank": []
+}

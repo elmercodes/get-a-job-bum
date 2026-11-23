@@ -25,3 +25,37 @@ server/test/reports/
 # Claude Code tool state (oh-my-claudecode, serena)
 .omc/
 .serena/
+
+# Applicant data and local credentials
+/private_data/
+/personal_data/
+/personal/
+/secrets/
+/credentials/
+/exports/
+/generated_resumes/
+/applications/
+/local_backups/
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3-shm
+*.sqlite3-wal
+*.db
+*.db-shm
+*.db-wal
+*.pem
+*.p12
+*.pfx
+*.key
+!.env.*.example
+# Tokens and private developer overrides
+*.local.json
+*.local.yaml
+*.local.yml
+*.local.js
+*.credentials.json
+# Note: upstream ignores root data/ and server/.env; leave those intact.
+# Do not indiscriminately ignore *.docx or *.pdf: fictional fixture files may be intentional.
+# Instead, never place real applicant documents under a tracked path.
