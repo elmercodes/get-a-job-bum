@@ -2326,7 +2326,6 @@
     return part ? datePart(value, part) || value : value;
   };
   // Outbound links on the job page (a "company website" link is often among them), for company research.
-  const pageLinks = () => [...new Set([...document.querySelectorAll('a[href^="http"]')].map((a) => a.href).filter((h) => { try { return new URL(h).hostname !== location.hostname; } catch { return false; } }))].slice(0, 25);
   // "Show me": bring a field you need to fix into view, outline it red and put the cursor in it.
   function jumpTo(id) {
     const el = findById(id) || groups.get(id)?.[0];
@@ -2416,7 +2415,6 @@
     optionPoint,
     checkValue,
     boxValue,
-    pageLinks,
     snapshotForm,
     jumpTo,
     fieldError,

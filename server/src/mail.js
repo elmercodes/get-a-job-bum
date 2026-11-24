@@ -8,6 +8,13 @@ import nodemailer from 'nodemailer';
 
 export const mailConfigured = () => !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD);
 
+export function scheduledMailHours(env = process.env) {
+  const hours = Number(env.MAIL_SCAN_HOURS);
+  return env.AUTOJOB_ENABLE_MAIL === '1' && Number.isFinite(hours) && hours >= 1 && hours <= 168 ? hours : 0;
+}
+
+export const mailModelEnabled = (env = process.env) => env.AUTOJOB_ENABLE_MAIL === '1' && /^(?:1|true|on)$/i.test(env.MAIL_AI || '');
+
 function client() {
   return new ImapFlow({
     host: 'imap.gmail.com',

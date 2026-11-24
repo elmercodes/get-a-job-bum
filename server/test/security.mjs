@@ -11,6 +11,16 @@ assert.equal(await health({ Authorization: 'Bearer wrong' }), 401);
 assert.equal(await health(auth), 200);
 assert.equal(await health({ ...auth, Origin: base }), 200);
 assert.equal(await health({ ...auth, Origin: 'https://example.invalid' }), 403);
+const restrictedUrls = ['http://127.0.0.1/fictional', 'http://169.254.169.254/fictional', 'http://[::1]/fictional',
+  'https://linkedin.com/jobs/view/fictional', 'https://fixture:example@fictional.example.com/'];
+const jobCheck = await fetch(base + '/api/jobs/check', { method: 'POST',
+  headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ urls: restrictedUrls }) });
+assert.equal(jobCheck.status, 200);
+assert.deepEqual((await jobCheck.json()).results, Object.fromEntries(restrictedUrls.map((url) => [url, 'unknown'])));
+const foreignResearch = await fetch(base + '/api/research', { method: 'POST',
+  headers: { ...auth, 'Content-Type': 'application/json', Origin: 'https://unrelated.example.invalid' },
+  body: JSON.stringify({ company: 'Fictional Employer' }) });
+assert.equal(foreignResearch.status, 403);
 
 const extensionId = 'a'.repeat(32);
 const gate = localApi({ port: +new URL(base).port, token, extensionId, test: false });

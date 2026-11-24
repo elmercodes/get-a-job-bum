@@ -22,6 +22,7 @@ import { COVER_SYSTEM, EMAIL_SYSTEM, VISION_SYSTEM, UPSKILL_SYSTEM } from './pro
 import { cleanJobText } from './guard.js';
 import { atsCheck } from './atscheck.js';
 import { researchCompany, researchFor } from './research.js';
+import { readPublic } from './public-http.js';
 import { traceOutcomes } from './outcomes.js';
 import { crisp, cleanRole, withoutGradSentences } from './tailor.js';
 import { profileSkillsInJD, makeMatcher, norm, TECH_TERMS } from './keywords.js';
@@ -29,7 +30,7 @@ import { listHackathons } from './hackathons.js';
 import { exportWorkbook } from './export.js';
 import { checkJobs } from './jobcheck.js';
 import { listInternships } from './internships.js';
-import { mailConfigured, mailStatus, findVerification, sendApplication, smtpCheck } from './mail.js';
+import { mailConfigured, scheduledMailHours, mailStatus, findVerification, sendApplication, smtpCheck } from './mail.js';
 import { renderResumePDF, renderCoverLetterPDF } from './pdf.js';
 import { answerFields } from './answer.js';
 import { followUpDraft, interviewPrep } from './coach.js';
@@ -264,11 +265,16 @@ function coverProblems(t) {
 }
 
 // Cover letter for one job: text (for text boxes) and a PDF (for upload fields).
-// Company research before applying (Google-Search-grounded, cached a week).
+// The public research operation deliberately receives only job fields.
 app.post('/api/research', route(async (req, res) => {
-  const profile = getProfile();
-  if (!profile) return res.status(400).json({ error: 'Import your resume first' });
-  res.json(await researchCompany({ ...req.body, description: cleanJobText(req.body?.description).text }, profile, { refresh: !!req.body?.refresh }));
+  const { company, title = '', description = '', companyUrl, refresh, useModel } = req.body || {};
+  if (typeof company !== 'string' || !company.trim() || company.length > 180 ||
+      typeof title !== 'string' || title.length > 180 || typeof description !== 'string' || description.length > 15000) {
+    return res.status(400).json({ error: 'Enter a company and a supported job description.' });
+  }
+  const job = { company: cleanJobText(company).text, title: cleanJobText(title).text, description: cleanJobText(description).text };
+  if (!job.company) return res.status(400).json({ error: 'Enter a company name.' });
+  res.json(await researchCompany(job, getProfile(), { companyUrl, refresh: refresh === true, useModel: useModel === true }));
 }));
 
 app.post('/api/cover-letter', route(async (req, res) => {
@@ -429,14 +435,15 @@ app.post('/api/upskill', route(async (req, res) => {
 app.get('/api/expand', route(async (req, res) => {
   const profile = getProfile();
   if (!profile) return res.status(400).json({ error: 'Import your resume first' });
-  const user = (String(profile.links?.github || '').match(/github\.com\/([^/\s?#]+)/) || [])[1];
+  const github = URL.canParse(profile.links?.github || '') ? new URL(profile.links.github) : null;
+  const user = github?.hostname === 'github.com' && !github.username && !github.password
+    ? github.pathname.match(/^\/([\w-]{1,39})\/?$/)?.[1] : null;
   if (!user) return res.status(400).json({ error: 'Add your GitHub link to your profile first' });
-  const r = await fetch(`https://api.github.com/users/${user}/repos?per_page=100&sort=updated`, {
-    headers: { 'User-Agent': 'AutoJob (local tool)', Accept: 'application/vnd.github+json' },
-    signal: AbortSignal.timeout(10000),
+  const r = await readPublic(`https://api.github.com/users/${user}/repos?per_page=100&sort=updated`, {
+    types: ['application/json'], allow: (url) => url.hostname === 'api.github.com', maxRedirects: 0,
   });
-  if (!r.ok) throw new Error(`GitHub ${r.status}: ${(await r.json()).message || ''}`);
-  const repos = (await r.json()).filter((x) => !x.fork);
+  if (!r.ok) return res.status(502).json({ error: 'GitHub repositories are unavailable.' });
+  const repos = JSON.parse(r.text).filter((x) => !x.fork);
   const inProfile = makeMatcher(JSON.stringify(profile));
   const NOISE = /hacktoberfest|awesome|tutorial|course|learn(ing)?|beginner|interview|portfolio|resume|cv\b|dotfiles|config|notes|100day|365day/i;
   const suggestions = new Map();
@@ -588,8 +595,8 @@ function runTrace({ apply = true, autoAdd = true, days } = {}) {
 }
 app.post('/api/applications/trace', route(async (req, res) => res.json(await runTrace({ apply: !!req.body?.apply, autoAdd: req.body?.autoAdd !== false, days: req.body?.days }))));
 app.get('/api/applications/trace/last', (req, res) => res.json(fs.existsSync(TRACE_FILE) ? JSON.parse(fs.readFileSync(TRACE_FILE, 'utf8')) : null));
-// While the server runs it checks your mail on its own (MAIL_SCAN_HOURS, default 3; 0 turns it off).
-const SCAN_HOURS = Number(process.env.MAIL_SCAN_HOURS ?? 3);
+// Background mail requires both integration authorization and an explicit interval.
+const SCAN_HOURS = scheduledMailHours();
 if (SCAN_HOURS > 0 && mailConfigured() && !process.env.CI) {
   const scan = () => runTrace().then((r) => console.log(`Gmail: ${r.jobEmails} job emails, ${r.applied.length} updated, ${r.added.length} added`)).catch((e) => console.log('Gmail check failed:', e.message));
   setTimeout(scan, 2 * 60_000).unref();

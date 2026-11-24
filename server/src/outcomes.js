@@ -1,6 +1,6 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
-import { mailConfigured } from './mail.js';
+import { mailConfigured, mailModelEnabled } from './mail.js';
 
 // Traces what happened to your applications from your Gmail (read-only): rejections, interview invites,
 // assessments, offers and "we received your application" confirmations, each matched to a tracked job.
@@ -124,7 +124,7 @@ function jobSignal(m) {
 }
 
 // Uncertain emails (no outcome wording, but a job-ish sender or subject): the AI reads the subject, sender and the
-// first lines (never the whole mailbox) and says which are about your applications. MAIL_AI=off keeps it rules-only.
+// first lines (never the whole mailbox) and says which are about your applications. MAIL_AI=on opts in.
 const MAIL_AI_SYSTEM = `You read a job seeker's emails. For each EMAIL decide whether it is about the user's OWN job search:
 an application they made, an online test, an interview, a decision, an offer, or a recruiter personally contacting them.
 NOT job related: job alerts and "jobs for you" lists, newsletters, marketing, courses, hackathons and competitions, OTPs, receipts.
@@ -137,14 +137,14 @@ Return JSON {"emails":[{"i": number, "job": boolean, "kind": "applied"|"assessme
   "outreach" = a recruiter offering the user a new role; "applied" = a confirmation that an application was received.`;
 // Returns Map(mailId -> {job, kind, company, role}) for every email it could read, or null when no AI is available.
 async function aiRead(list) {
-  if (!list.length || /^(off|0|false|no)$/i.test(process.env.MAIL_AI || '')) return null;
+  if (!list.length || !mailModelEnabled()) return null;
   const { chatJSON } = await import('./llm.js');
   const out = new Map();
   for (let k = 0; k < list.length && k < 640; k += 40) {
     const batch = list.slice(k, k + 40);
     const user = JSON.stringify({ EMAILS: batch.map((m, j) => ({ i: j, from: `${m.fromName} <${m.fromAddr}>`.slice(0, 120), subject: m.subject.slice(0, 160), start: m.text.replace(/\s+/g, ' ').slice(0, 700) })) });
     try {
-      const r = await chatJSON(MAIL_AI_SYSTEM, user, { temperature: 0, budgetMs: 60000 });
+      const r = await chatJSON(MAIL_AI_SYSTEM, user, { temperature: 0, budgetMs: 60000, fallback: false });
       for (const e of r.emails || []) if (e && batch[e.i]) out.set(batch[e.i].id, e);
     } catch {
       if (!out.size && k >= 80) return null; // no AI right now: the rules-only result stands

@@ -4,6 +4,7 @@
 // we ask for the panel, check it actually loaded, and fall back to the window if it didn't.
 
 const canOpenSidePanel = typeof chrome.sidePanel?.open === 'function';
+chrome.storage.local.setAccessLevel?.({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(() => {});
 
 // The worker can be stopped between clicks, so the open window's id lives in session storage.
 const getWin = async () => (await chrome.storage.session.get('panelWindowId')).panelWindowId ?? null;
@@ -39,7 +40,13 @@ async function sidePanelIsOpen(since) {
 
 // Messages from the panel (side panel, popup, tab or window).
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+  const prefix = 'chrome-extension://' + chrome.runtime.id;
+  if (sender.id !== chrome.runtime.id || typeof sender.url !== 'string' ||
+      sender.url.split(/[?#]/, 1)[0] !== prefix + '/sidepanel.html' ||
+      (sender.origin && sender.origin !== prefix) || (sender.frameId !== undefined && sender.frameId !== 0) ||
+      !msg || typeof msg !== 'object' || Array.isArray(msg)) return false;
   if (msg?.type === 'panel-alive') {
+    if (!['sidepanel', 'popup', 'tab', 'window'].includes(msg.mode)) return false;
     if (msg.mode === 'sidepanel') {
       chrome.storage.session.set({ panelAliveAt: Date.now() });
       // The real side panel just loaded, so this browser supports it (Chrome, Edge, Brave; never Arc):
@@ -50,6 +57,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     return false;
   }
   if (msg?.type === 'side-panel-open?') {
+    if (!Number.isSafeInteger(msg.since) || msg.since < 0 || msg.since > Date.now()) return false;
     sidePanelIsOpen(msg.since).then(reply);
     return true; // async reply
   }

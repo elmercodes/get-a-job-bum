@@ -10,7 +10,9 @@ const run = (handler) => (req, res, next) => Promise.resolve().then(() => handle
 
 router.get('/reviews', run((req, res) => res.json({ reviews: listDocxReviews() })));
 router.post('/research', run(async (req, res) => {
-  res.json({ research: await researchPublicJob(jobSnapshot(req.body?.job), { useModel: req.body?.useModel === true }) });
+  res.json({ research: await researchPublicJob(jobSnapshot(req.body?.job), {
+    useModel: req.body?.useModel === true, companyUrl: req.body?.companyUrl,
+  }) });
 }));
 router.post('/reviews', run(async (req, res) => res.status(201).json(await createDocxReview(req.body))));
 router.get('/reviews/:id', run((req, res) => res.json(getDocxReview(req.params.id))));

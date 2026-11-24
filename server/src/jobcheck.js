@@ -2,10 +2,11 @@
 // 404 / 410, a redirect to the general listing (Greenhouse, zapply), "no longer accepting applications" text,
 // and for Workday (whose pages are built by script) its JSON job API, which answers 404 once a job closes.
 // Answers: 'open', 'closed', or 'unknown' (blocked, login wall, timeout): unknown jobs are never hidden.
-const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36';
+import { readPublic, publicUrl } from './public-http.js';
+
+const restricted = /(?:^|\.)(?:linkedin\.com|indeed\.com|naukri\.com|wellfound\.com)$/i;
+const allow = (url) => !restricted.test(url.hostname);
 const CLOSED_TEXT = /no longer (accepting|available|open|active)|(position|role|vacancy|job) has (already )?been filled|(this |the )?(job|posting|position|role|vacancy|opening|requisition) (has |is )?(now )?(expired|closed|been closed|been removed)|applications? (are|is|have) (now )?closed|not accepting (any )?(new )?applications|job not found|posting is closed/i;
-// Only public web hosts: the panel decides which links get opened, never a page.
-const PRIVATE = /^(localhost|0\.|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[)/i;
 const TTL = 12 * 3600_000;
 const cache = new Map(); // url -> { status, at }
 
@@ -41,17 +42,15 @@ async function checkOne(url) {
   if (hit && Date.now() - hit.at < TTL) return hit.status;
   let status = 'unknown';
   try {
-    const u = new URL(url);
-    if (!/^https?:$/.test(u.protocol) || PRIVATE.test(u.hostname)) return 'unknown';
-    // shortcut: only the first URL is checked against private hosts, not redirect targets; fine while only the extension can call this.
-    const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'text/html,application/json' }, redirect: 'follow', signal: AbortSignal.timeout(15000) });
+    if (!allow(publicUrl(url))) return 'unknown';
+    const res = await readPublic(url, { allow, maxBytes: 1024 * 1024 });
     const api = res.ok && workdayApi(res.url);
     if (api) {
-      const w = await fetch(api, { headers: { 'User-Agent': UA, Accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
-      const info = w.ok ? (await w.json().catch(() => ({}))).jobPostingInfo : null;
-      status = w.status === 404 ? 'closed' : !w.ok ? 'unknown' : info?.canApply === false ? 'closed' : 'open';
+      const w = await readPublic(api, { allow: (target) => target.origin === new URL(api).origin, types: ['application/json'] });
+      const info = w.ok ? JSON.parse(w.text).jobPostingInfo : null;
+      status = w.status === 404 || w.status === 410 ? 'closed' : !info ? 'unknown' : info.canApply === false ? 'closed' : 'open';
     } else {
-      const html = /html|text/.test(res.headers.get('content-type') || '') ? await res.text() : '';
+      const html = res.text;
       // Visible words only: scripts and tags often carry template strings like "Job expired" for every job.
       const text = html.replace(/<(script|style|noscript)[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' ');
       status = verdict({ from: url, to: res.url, status: res.status, text });
@@ -65,7 +64,7 @@ async function checkOne(url) {
 
 export async function checkJobs(urls) {
   const list = [...new Set(urls.filter((u) => typeof u === 'string'))].slice(0, 100);
-  const out = {};
+  const out = Object.create(null);
   const queue = [...list];
   await Promise.all(Array.from({ length: 8 }, async () => {
     while (queue.length) {

@@ -16,6 +16,8 @@ A Chrome / Arc extension and a small local server that read a job posting, tailo
 
 On the Get a Job, Bum! development branch, **Tailor an existing Word resume** uses approved applicant evidence to propose paragraph edits, preserves the source design, and exports a reviewed DOCX with an optional verified PDF. See the [Word tailoring guide](docs/PHASE_3.md).
 
+For a clean local installation, fictional end-to-end exercise, and the current release checks, use the [Phase 4 developer and verification guide](docs/PHASE_4.md).
+
 ### ▶ The 60-second reel
 
 <p align="center">
@@ -227,7 +229,7 @@ Every screenshot is the real panel and the real form-filling engine, with the ma
 </tr>
 <tr>
 <td><img src="docs/screenshots/panel-apply-light.png" alt="Apply tab in light mode" /><br><b>Light and dark</b>: follows your system theme. Runs as a side panel in Chrome / Edge / Brave, and as a popup, tab or window in Arc.</td>
-<td><img src="docs/screenshots/company-research.png" alt="Company research card" /><br><b>Company research</b>: products, stack, recent news, interview focus, red flags, your fit and an angle, each fact with its source.</td>
+<td><img src="docs/screenshots/company-research.png" alt="Company research card" /><br><b>Company research</b> in the upstream demo. The current panel distinguishes cited excerpts, posting requirements and possible skill overlap.</td>
 </tr>
 </table>
 
@@ -440,7 +442,7 @@ Use the copy-and-paste workflow for LinkedIn and Indeed, then open the employer'
   - Tracked applications move forward (never backwards, except rejections and offers, which always land).
   - Applications you never tracked are **added from the emails about them**, one per role, with their status, and later emails follow them. Remove any with one click.
   - Each card keeps **every email about it as a timeline**. Recruiters writing to you are listed separately.
-  - `MAIL_SCAN_DAYS` (default 90), `MAIL_SCAN_HOURS` (default 3, 0 = off) and `MAIL_AI=off` (rules only) in `server/.env`.
+  - `MAIL_SCAN_DAYS` defaults to 90. Set `MAIL_SCAN_HOURS` from 1 to 168 to enable background scans. `MAIL_AI=on` opts in to provider categorization. The default uses local rules.
 - **✉️ Follow-up draft:** on applications with no reply after 7 days. A short, polite email naming the role, when you applied and one true reason you fit. Copy it and send it yourself; Auto Job never sends it.
 - **🎯 Interview prep:** on applications at assessment or interview (or when Gmail found an invite). A one-page brief from the job description, your profile and the company research: likely questions with how to answer from your own work, which of your stories to use, questions to ask them, and a checklist for the day before.
 
@@ -533,30 +535,9 @@ Test page: `/test/heal.html`. One box only accepts individual key presses, so it
 
 ## Company research
 
-Before applying, Auto Job researches the company so your application says something specific and true about it.
+Research the employer from the **Company research** card. Add an official website if the posting identifies one. The panel reads a bounded set of employer or reference excerpts and reports their source and retrieval time. You can also see the posting's stated requirements and possible overlap with approved skills. Unavailable information is marked unknown.
 
-<img src="docs/screenshots/company-research.png" width="360" align="right" alt="Company research card for Razorpay: products, stack, recent news, interview focus, red flags, your fit, your angle, questions to ask, and the 4 sources" />
-
-| Section | What you get |
-|---|---|
-| **Snapshot** | What the company does, its products and customers, stage (public / funding) and HQ |
-| **Engineering stack** | Technologies the company or team uses |
-| **Recent news** | Funding, launches, licences, layoffs or leadership changes from the last 12 months, with dates |
-| **Culture and team** | How they work, and what the team behind this role builds |
-| **Interview** | Rounds a source reports, or "From the job post:" what the role suggests, plus the topics to prepare |
-| **⚠️ Red flags** | Sourced concerns only (layoffs, pay delays, legal trouble), or "None found" |
-| **Your fit** | Where your real experience matches (✓) and the gaps (△) |
-| **Your angle** | One positioning sentence, three talking points from your own work, and three questions to ask them |
-| **Sources** | Every page it used, as links |
-
-**How it stays factual:**
-- **It reads real sources itself:** the company's website (home, about, careers and engineering pages), Wikipedia and Wikidata (which also give the official website when the job page doesn't link it), and recent headlines from Google News. When your Gemini key supports Google Search grounding (paid keys), that's used too.
-- **The AI may only use those sources.** Anything they don't support is left empty instead of guessed, and every source used is listed as a link.
-- **No people profiling.** It describes the *team* behind the role, and never researches or names individual employees or the hiring manager.
-- **It improves the cover letter.** The "why this company" line in the cover letter comes from these sourced facts instead of a generic sentence.
-- **Cost:** one AI request, saved for a week per company and role (**↻ Fresh** re-researches). The **🔎 Research company** switch runs it automatically during **Do it all**.
-
-<br clear="right"/>
+The default uses local ranking. The optional model control ranks a shortlist of public excerpts through your authorized provider. The cover letter can use cited employer excerpts. Choose **Fresh** to look up the same role again, or enable **Research company** in the existing workflow to do it during **Do it all**.
 
 ## The form-filling engine
 

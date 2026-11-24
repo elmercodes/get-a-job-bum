@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from './store.js';
+import { readPublic } from './public-http.js';
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36';
 const TTL = 30 * 60_000;
@@ -17,10 +18,13 @@ let cache = (() => {
 })();
 cache.byPlatform ||= {};
 
-const get = async (url, opts = {}) => {
-  const res = await fetch(url, { ...opts, headers: { 'User-Agent': UA, Accept: 'application/json,text/html', ...(opts.headers || {}) }, signal: AbortSignal.timeout(20000) });
-  if (!res.ok) throw new Error(`${res.status} ${url}`);
-  return opts.text ? res.text() : res.json();
+const get = async (url, { method = 'GET', body, text } = {}) => {
+  const host = new URL(url).hostname.replace(/^www\./, '');
+  const res = await readPublic(url, { method, body, userAgent: UA, timeoutMs: 12000, maxBytes: 5 * 1024 * 1024,
+    allow: (target) => target.hostname.replace(/^www\./, '') === host,
+    types: text ? ['text/html', 'application/xhtml+xml'] : ['application/json'] });
+  if (!res.ok) throw new Error(`Listing service returned status ${res.status}`);
+  return text ? res.text : JSON.parse(res.text);
 };
 const iso = (d) => {
   const t = d ? new Date(d) : null;
@@ -122,7 +126,7 @@ const SOURCES = {
   async devfolio() {
     const out = [];
     for (const type of ['application_open', 'upcoming']) {
-      const d = await get('https://api.devfolio.co/api/search/hackathons', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type, from: 0, size: 40 }) }).catch(() => null);
+      const d = await get('https://api.devfolio.co/api/search/hackathons', { method: 'POST', body: JSON.stringify({ type, from: 0, size: 40 }) }).catch(() => null);
       for (const { _source: h } of d?.hits?.hits || []) {
         out.push({
           title: h.name,

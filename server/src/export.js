@@ -11,7 +11,11 @@ const GOOD = ['DCFCE7', '166534'], MID = ['FEF3C7', '92400E'], BAD = ['FEE2E2', 
 const fill = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${argb}` } });
 const chip = (cell, [bg, fg]) => Object.assign(cell, { fill: fill(bg), font: { bold: true, color: { argb: `FF${fg}` } }, alignment: { horizontal: 'center', vertical: 'middle' } });
 // Only real web links become clickable (a posting can't smuggle in a javascript: or file: link).
-const webUrl = (u) => (/^https?:\/\//i.test(String(u || '')) ? String(u) : '');
+function webUrl(value) {
+  if (typeof value !== 'string' || !/^https?:\/\//i.test(value) || /[\s\\\x00-\x1f\x7f]/u.test(value) || !URL.canParse(value)) return '';
+  const url = new URL(value);
+  return url.username || url.password ? '' : url.href;
+}
 const day = (d) => (d && !isNaN(new Date(d)) ? new Date(d) : null);
 
 function sheet(wb, name, color, columns, rows, paint) {

@@ -23,3 +23,13 @@ export function cleanJobText(text) {
   }
   return { text: kept.join('\n').replace(/\n{3,}/g, '\n\n').trim(), stripped };
 }
+
+// Keep externally retrieved statements as quoted data. Drop instructions even
+// on longer lines before exposing excerpts to ranking or a local preview.
+export function cleanResearchText(value) {
+  if (typeof value !== 'string') return '';
+  return value.replace(INVISIBLE, '').split(/\r?\n|(?<=[.!?])\s+/u)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter((line) => line && !INSTRUCTION_LINE.test(line))
+    .join(' ').slice(0, 4800);
+}

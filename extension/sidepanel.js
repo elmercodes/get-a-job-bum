@@ -75,17 +75,18 @@ function toast(msg, bad = false) {
 }
 
 // Every request has a time limit, so a slow AI or network shows an error instead of an endless spinner.
-const API_TIMEOUTS = [[/^\/api\/profile\/import/, 300000], [/^\/api\/docx\//, 150000], [/^\/api\/(tailor|cover-letter)/, 180000], [/^\/api\/otp/, 200000], [/^\/api\/(email|answer)/, 100000], [/^\/api\/(hackathons|export)/, 90000], [/^\/api\/jobs\/check/, 200000]];
-async function api(path, opts = {}) {
+const API_TIMEOUTS = [[/^\/api\/profile\/import/, 300000], [/^\/api\/docx\//, 150000], [/^\/api\/research$/, 90000], [/^\/api\/(tailor|cover-letter)/, 180000], [/^\/api\/otp/, 200000], [/^\/api\/(email|answer)/, 100000], [/^\/api\/(hackathons|export)/, 90000], [/^\/api\/jobs\/check/, 200000]];
+async function api(path, opts = {}, pairing = { server: SERVER, token: API_TOKEN }) {
   const ms = API_TIMEOUTS.find(([re]) => re.test(path))?.[1] || 30000;
-  if (!loopback(SERVER)) throw new Error('Choose a loopback server address');
-  if (!API_TOKEN) throw new Error('Pair your local server under Profile');
-  const res = await fetch(SERVER + path, {
+  if (!loopback(pairing.server)) throw new Error('Choose a loopback server address');
+  if (!pairing.token) throw new Error('Pair your local server under Profile');
+  const timeout = AbortSignal.timeout(ms);
+  const res = await fetch(pairing.server + path, {
     redirect: 'error',
     ...opts,
-    signal: AbortSignal.timeout(ms),
+    signal: opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout,
     headers: {
-      Authorization: 'Bearer ' + API_TOKEN,
+      Authorization: 'Bearer ' + pairing.token,
       'X-AutoJob-Extension': chrome.runtime.id,
       ...(opts.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
     },
@@ -96,6 +97,7 @@ async function api(path, opts = {}) {
   });
   if (opts.raw && res.ok) return res.blob();
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401) throw new Error('Pair the current backend token under Profile.');
   if (!res.ok) throw Object.assign(new Error(data.error || `Server error ${res.status}`), { code: data.code, details: data.details });
   return data;
 }
@@ -119,8 +121,11 @@ function busy(btn, fn) {
 }
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 // Links and images from job boards / APIs: only plain http(s) URLs get into the panel.
-const safeUrl = (u) => (/^https?:\/\/[^\s"'<>]+$/i.test(String(u || '')) ? String(u) : '#');
-const safeImg = (u) => (/^https:\/\/[^\s"'()<>]+$/i.test(String(u || '')) ? String(u) : '');
+function safeUrl(input) {
+  if (typeof input !== 'string' || !/^https?:\/\//i.test(input) || /[\s\\\x00-\x1f\x7f]/u.test(input) || !URL.canParse(input)) return '#';
+  const url = new URL(input);
+  return url.username || url.password ? '#' : url.href;
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Stepper: job → resume → fill → review. Earlier steps turn "done", the given one "active".
@@ -159,7 +164,7 @@ function keywordBlock(k) {
   </div>`;
 }
 
-const docLink = (b64, name, label) => `<a class="doc-link" href="${b64ToBlobUrl(b64, 'application/pdf')}" target="_blank">📄 ${esc(label || name)}</a>`;
+const docLink = (b64, name, label) => `<a class="doc-link" href="${b64ToBlobUrl(b64, 'application/pdf')}" target="_blank" rel="noopener noreferrer">📄 ${esc(label || name)}</a>`;
 const b64ToBlobUrl = (b64, type) => URL.createObjectURL(new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type }));
 
 function progress(msg, cls = 'on') {
@@ -264,6 +269,8 @@ async function readJob() {
   const frames = await callAll(tab.id, 'extractJob');
   const best = frames.map((f) => f.result).sort((a, b) => (b.source === 'json-ld') - (a.source === 'json-ld') || b.description.length - a.description.length)[0];
   if (!best) throw new Error('Could not read this page');
+  clearCurrentResearch();
+  $('#companyUrl').value = '';
   state.job = best;
   $('#jobTitle').value = best.title;
   $('#jobCompany').value = best.company;
@@ -292,43 +299,80 @@ const currentJob = () => ({
   description: $('#jobDesc').value.trim(),
   url: state.job?.url,
 });
-const jobKey = () => `${currentJob().company}|${currentJob().title}|${currentJob().description.length}`;
+const jobKey = () => JSON.stringify(currentJob());
 
 // ---------- company research ----------
+let researchRequest;
+
+function clearCurrentResearch() {
+  researchRequest?.abort();
+  researchRequest = null;
+  state.research = null;
+  $('#researchMeta').textContent = '';
+  $('#researchOut').replaceChildren();
+}
+
+for (const selector of ['#jobTitle', '#jobCompany', '#jobLocation', '#jobDesc', '#companyUrl', '#researchModel']) {
+  $(selector).addEventListener('input', clearCurrentResearch);
+}
+$('#jobCompany').addEventListener('input', () => { $('#companyUrl').value = ''; });
+
 async function research({ refresh = false } = {}) {
   const job = currentJob();
-  if (!job.company) throw new Error('Read the job first (no company name yet)');
-  $('#researchOut').innerHTML = `<p class="hint">Researching ${esc(job.company)}: website, Wikipedia, recent news…</p>`;
-  const tab = await activeTab().catch(() => null);
-  const links = tab ? (await callAll(tab.id, 'pageLinks').catch(() => [])).flatMap((f) => f.result || []) : [];
-  const r = await api('/api/research', { method: 'POST', body: { ...job, links, refresh } });
-  state.research = r;
-  renderResearch(r);
-  return r;
+  if (!job.company) throw new Error('Enter the employer from the posting.');
+  researchRequest?.abort();
+  const controller = new AbortController();
+  researchRequest = controller;
+  const key = jobKey();
+  $('#researchOut').textContent = 'Looking up public sources for ' + job.company + '…';
+  try {
+    const r = await api('/api/research', { method: 'POST', signal: controller.signal, body: {
+      ...job, companyUrl: $('#companyUrl').value.trim(), refresh, useModel: $('#researchModel').checked,
+    } });
+    if (researchRequest !== controller || key !== jobKey()) return;
+    state.research = { key, result: r };
+    renderResearch(r);
+  } catch (error) {
+    if (controller.signal.aborted) return;
+    $('#researchOut').textContent = 'Research unavailable. ' + error.message;
+    throw error;
+  } finally {
+    if (researchRequest === controller) researchRequest = null;
+  }
 }
-function renderResearch(r) {
-  const chips = (xs) => (xs || []).map((x) => `<span class="chip">${esc(x)}</span>`).join(' ');
-  const list = (xs) => (xs?.length ? `<ul>${xs.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '');
-  const sec = (title, body) => (body ? `<div class="r-sec"><b>${title}</b>${body}</div>` : '');
-  const s = r.snapshot || {};
-  const age = Math.round((Date.now() - r.at) / 3600_000);
-  $('#researchMeta').textContent = `${r.company} · ${r.confidence} confidence`;
-  $('#researchOut').innerHTML = `<div class="research">
-    <p>${esc(s.what || '')}${s.stage || s.hq ? `<span class="src">${esc([s.stage, s.hq].filter(Boolean).join(' · '))}</span>` : ''}</p>
-    ${sec('Products', s.products?.length ? `<div>${chips(s.products)}</div>` : '')}
-    ${sec('Customers', s.customers ? `<p>${esc(s.customers)}</p>` : '')}
-    ${sec('Engineering stack', r.stack?.length ? `<div>${chips(r.stack)}</div>` : '')}
-    ${sec('Recent news', r.news?.length ? `<ul>${r.news.map((n) => `<li>${esc(n.headline)}${n.date ? ` <span class="src">${esc(n.date)}</span>` : ''}</li>`).join('')}</ul>` : '')}
-    ${sec('Culture', list(r.culture))}
-    ${sec('The team', r.team ? `<p>${esc(r.team)}</p>` : '')}
-    ${sec('Interview', r.interview?.process || r.interview?.focus?.length ? `<p>${esc(r.interview.process || '')}</p>${r.interview.focus?.length ? `<div>${chips(r.interview.focus)}</div>` : ''}` : '')}
-    ${sec('⚠️ Red flags', r.redFlags?.length ? `<ul>${r.redFlags.map((f) => `<li class="bad-text">${esc(f.flag)}${f.evidence ? ` <span class="src">${esc(f.evidence)}</span>` : ''}</li>`).join('')}</ul>` : '<p class="hint">None found in these sources.</p>')}
-    ${sec('Your fit', `${r.fit?.strengths?.length ? `<p class="good-text">✓ ${r.fit.strengths.map(esc).join('<br>✓ ')}</p>` : ''}${r.fit?.gaps?.length ? `<p class="warn-text">△ ${r.fit.gaps.map(esc).join('<br>△ ')}</p>` : ''}`)}
-    ${sec('Your angle', r.strategy?.angle ? `<p><i>${esc(r.strategy.angle)}</i></p>${list(r.strategy.talkingPoints)}` : '')}
-    ${sec('Questions to ask them', list(r.strategy?.questionsToAsk))}
-    ${sec(`Sources (${r.sources?.length || 0})`, r.sources?.length ? `<ol class="sources">${r.sources.map((x) => `<li><a href="${esc(safeUrl(x.url))}" target="_blank">${esc(x.title || x.url)}</a></li>`).join('')}</ol>` : '<p class="hint">No sources found: treat this as unverified.</p>')}
-    <p class="hint">${esc(r.method || '')}${r.cached ? ` · saved ${age < 1 ? 'just now' : `${age} h ago`}` : ''} · the cover letter uses these facts</p>
-  </div>`;
+
+function renderResearch(result) {
+  const append = (parent, tag, value) => {
+    const node = document.createElement(tag);
+    if (value) node.textContent = value;
+    parent.append(node);
+    return node;
+  };
+  const out = $('#researchOut');
+  out.replaceChildren();
+  $('#researchMeta').textContent = result.company;
+  const kinds = { official: 'Official employer source', employer_provided: 'Employer URL supplied in the panel',
+    reference: 'Independent reference', reported: 'Reported headline' };
+  const group = (label, items, show) => {
+    if (!items?.length) return;
+    append(out, 'h4', label);
+    const list = append(out, 'ul');
+    for (const item of items) show(append(list, 'li'), item);
+  };
+  group('Posting requirements', result.requirements, (row, item) => { row.textContent = item.category + ' · ' + item.text; });
+  group('Sourced employer and reference excerpts', result.observations?.filter((item) => item.kind !== 'reported'), showSource);
+  group('Reported news', result.observations?.filter((item) => item.kind === 'reported'), showSource);
+  group('Possible overlap with approved skills', result.inferences, (row, item) => { row.textContent = item.text; });
+  group('Unknown information', result.unknown, (row, item) => { row.textContent = item; });
+
+  function showSource(row, item) {
+    const link = append(row, 'a', item.title);
+    link.href = safeUrl(item.url);
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    append(row, 'p', item.text);
+    append(row, 'small', (kinds[item.kind] || 'Source') + ' · Retrieved ' + new Date(item.retrievedAt).toLocaleString());
+  }
 }
 
 // ---------- 2. resume & cover letter ----------
@@ -1169,7 +1213,18 @@ async function openApplication(tab) {
 
 // ---------- all-in-one ----------
 async function runAll() {
+  if (state.running || state.fillActive) throw new Error('An application workflow is already running.');
+  state.running = true;
+  try {
+    return await runAllSteps();
+  } finally {
+    state.running = false;
+  }
+}
+
+async function runAllSteps() {
   let tab = await activeTab();
+  const posting = jobKey();
   state.log = [];
   state.startedAt = Date.now() - 2 * 60_000;
   resetSteps();
@@ -1177,9 +1232,13 @@ async function runAll() {
   $('#progress').innerHTML = '';
   progress('Reading the job…');
   if (currentJob().description.length < 80) throw new Error('Paste the description or explicitly read the employer posting first');
-  if ($('#researchFirst').checked && currentJob().company && state.research?.company !== currentJob().company) {
+  if ($('#researchFirst').checked && currentJob().company && state.research?.key !== jobKey()) {
     progress(`Researching ${currentJob().company}…`);
     await research().catch((e) => progress(`Company research skipped: ${e.message.slice(0, 80)}`));
+  }
+
+  if (posting !== jobKey() || (await chrome.tabs.get(tab.id)).url !== tab.url) {
+    throw new Error('The posting changed. Start the workflow again for the current application.');
   }
 
   tab = await openApplication(tab);
@@ -1265,7 +1324,7 @@ function renderJobs() {
   $('#jobCount').textContent = `${shown.length} shown · ${state.boardJobs.filter((j) => j.selected).length} selected${closed ? ` · ${closed} closed${$('#openOnly').checked ? ' hidden' : ''}` : ''}`;
   $('#jobList').innerHTML =
     shown.map(({ j, i, m }, n) => `<label class="job ${isClosed(j) ? 'is-closed' : ''}" style="--i:${Math.min(n, 30)}"><input type="checkbox" data-i="${i}" ${j.selected ? 'checked' : ''}/><span class="match" style="--m:${m.score}" title="${esc(m.why.join(' · ') || 'match score')}">${m.score}</span>
-      <span class="job-main">${j.url ? `<a href="${esc(safeUrl(j.url))}" target="_blank">${esc(j.title)}</a>` : `<b>${esc(j.title)}</b>`}${trackedBadge(j)}${isClosed(j) ? ` <span class="badge bad" title="${j.open === 'closed' ? 'The link says this job is closed or expired' : 'Its end date has passed'}">closed</span>` : j.open === 'open' ? ` <span class="badge ok" title="The link still accepts applications">open</span>` : ''}${j.premium ? ` <span class="badge ${$('#includePremium').checked ? '' : 'warn'}">premium</span>` : ''}
+      <span class="job-main">${j.url ? `<a href="${esc(safeUrl(j.url))}" target="_blank" rel="noopener noreferrer">${esc(j.title)}</a>` : `<b>${esc(j.title)}</b>`}${trackedBadge(j)}${isClosed(j) ? ` <span class="badge bad" title="${j.open === 'closed' ? 'The link says this job is closed or expired' : 'Its end date has passed'}">closed</span>` : j.open === 'open' ? ` <span class="badge ok" title="The link still accepts applications">open</span>` : ''}${j.premium ? ` <span class="badge ${$('#includePremium').checked ? '' : 'warn'}">premium</span>` : ''}
       <span class="job-meta">${esc([j.meta, j.source].filter(Boolean).join(' · '))}${m.why.length ? ` · <i>${esc(m.why.slice(0, 2).join(' · '))}</i>` : ''}</span></span></label>`).join('') ||
     (state.boardJobs.length
       ? `<div class="empty"><span class="big">🧹</span>No jobs match. ${$('#openOnly').checked ? 'Closed jobs are hidden. ' : ''}<br><button class="btn ghost sm" data-act="unfilter" style="margin-top:8px">Show all ${state.boardJobs.length} jobs</button></div>`
@@ -1346,8 +1405,8 @@ async function scanBoard() {
 }
 
 async function openBoard() {
-  const url = $('#boardUrl').value.trim();
-  if (!/^https?:\/\//.test(url)) throw new Error('Paste a full link starting with https://');
+  const url = safeUrl($('#boardUrl').value.trim());
+  if (url === '#') throw new Error('Paste a full web link without credentials.');
   const tab = await browserTab();
   await chrome.tabs.update(tab.id, { url });
   await waitForLoad(tab.id);
@@ -1357,6 +1416,7 @@ async function openBoard() {
 async function openJob(i) {
   const job = state.queue[i];
   state.queueIdx = i;
+  clearCurrentResearch();
   state.job = state.resume = state.cover = null;
   ['#fillOut', '#tailorOut', '#coverOut', '#submitOut', '#emailOut'].forEach((s) => ($(s).innerHTML = ''));
   ['#emailTo', '#emailSubject', '#emailBody'].forEach((s) => ($(s).value = ''));
@@ -1554,7 +1614,7 @@ function renderTracker() {
             <div class="timeline">${tl}<span class="tl">${m.label}${a.history?.length ? ` · ${ago(a.history.at(-1).at)}` : ''}</span></div>
             ${mailLine(a)}${mailTimeline(a)}
             <textarea class="app-notes" data-notes="${a.id}" rows="1" placeholder="Add a note (recruiter name, test date, link…)">${esc(a.notes || '')}</textarea>
-            <div class="app-actions">${a.resume ? `<button data-artifact="${esc(a.resume)}">📄 Resume sent</button>` : ''}${a.coverLetter ? `<button data-artifact="${esc(a.coverLetter)}">✉️ Cover letter</button>` : ''}${a.status === 'submission_unverified' ? `<button data-confirm-submission="${esc(a.id)}">I verified submission on the employer site</button>` : ''}${a.status === 'saved' && a.url ? `<button class="go" data-apply="${a.id}">Apply now</button>` : ''}${a.url && safeUrl(a.url) !== '#' ? `<a href="${esc(a.url)}" target="_blank">Open job</a>` : ''}${coachButtons(a)}<button class="del" data-del="${a.id}">Delete</button></div><div class="app-coach" id="coach-${a.id}"></div>
+            <div class="app-actions">${a.resume ? `<button data-artifact="${esc(a.resume)}">📄 Resume sent</button>` : ''}${a.coverLetter ? `<button data-artifact="${esc(a.coverLetter)}">✉️ Cover letter</button>` : ''}${a.status === 'submission_unverified' ? `<button data-confirm-submission="${esc(a.id)}">I verified submission on the employer site</button>` : ''}${a.status === 'saved' && a.url ? `<button class="go" data-apply="${a.id}">Apply now</button>` : ''}${a.url && safeUrl(a.url) !== '#' ? `<a href="${esc(a.url)}" target="_blank" rel="noopener noreferrer">Open job</a>` : ''}${coachButtons(a)}<button class="del" data-del="${a.id}">Delete</button></div><div class="app-coach" id="coach-${a.id}"></div>
           </div>`;
         })
         .join('')
@@ -1726,7 +1786,7 @@ function showEmails(emails = []) {
 function renderAttachments() {
   const files = [state.resume?.key === jobKey() && { ...state.resume, kind: 'Resume' }, state.cover?.key === jobKey() && $('#autoCover').checked && { ...state.cover, kind: 'Cover letter' }].filter(Boolean);
   $('#emailAttach').innerHTML = files.length
-    ? files.map((f) => `<span class="file">📎 <a href="${b64ToBlobUrl(f.pdfBase64, 'application/pdf')}" target="_blank">${esc(f.filename)}</a></span>`).join('')
+    ? files.map((f) => `<span class="file">📎 <a href="${b64ToBlobUrl(f.pdfBase64, 'application/pdf')}" target="_blank" rel="noopener noreferrer">${esc(f.filename)}</a></span>`).join('')
     : '<span class="hint">Resume and cover letter are attached once written.</span>';
   return files;
 }
@@ -1896,12 +1956,10 @@ function renderHacks() {
           const p = PLAT[h.platform] || { name: h.platform, c: 'var(--accent)' };
           const cl = closesIn(h.deadline);
           const initials = h.title.replace(/[^A-Za-z0-9 ]/g, '').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
-          const img = safeImg(h.image);
-          const thumb = img ? `style="background-image:url('${esc(img)}')"` : `style="background:${p.c}"`;
           return `<div class="hack" style="--c:${p.c};--i:${Math.min(i, 30)}">
-            <div class="thumb" ${thumb}>${img ? '' : esc(initials)}</div>
+            <div class="thumb" style="background:${p.c}">${esc(initials)}</div>
             <div class="body">
-              <div class="t"><a href="${esc(safeUrl(h.url))}" target="_blank">${esc(h.title)}</a></div>
+              <div class="t"><a href="${esc(safeUrl(h.url))}" target="_blank" rel="noopener noreferrer">${esc(h.title)}</a></div>
               <div class="m">${[h.organizer && h.organizer !== p.name ? esc(h.organizer) : '', h.mode ? esc(h.mode) : '', h.location ? `📍 ${esc(h.location)}` : '', h.participants ? `👥 ${Number(h.participants).toLocaleString()}` : '', h.stage ? esc(h.stage) : ''].filter(Boolean).join(' · ')}</div>
               <div class="badges">${(() => { const m = fit.get(h.id); const why = [...m.hits, ...m.themes.filter((t) => !m.hits.length)].slice(0, 3); return why.length ? `<span class="hb match" title="Matches your profile">✨ ${esc(why.join(', '))}</span>` : ''; })()}<span class="hb plat-b">${p.name}</span>${h.prize ? `<span class="hb prize">🏆 ${esc(h.prize)}</span>` : ''}${(h.perks || []).map((k) => `<span class="hb perk" title="${esc(h.rewards || k)}">🎯 ${esc(k)}</span>`).join('')}${cl ? `<span class="hb ${cl.cls}">⏰ ${cl.text}</span>` : ''}${(h.tags || []).slice(0, 3).map((t) => `<span class="hb">${esc(t)}</span>`).join('')}</div>
             </div>
@@ -2006,7 +2064,7 @@ on('#refreshResearch', () => research({ refresh: true }));
 on('#tailor', tailor);
 on('#cover', coverLetter);
 on('#fill', async () => {
-  if (state.fillActive) throw new Error('An application is already filling');
+  if (state.running || state.fillActive) throw new Error('An application workflow is already running.');
   state.log = [];
   state.workflow = null;
   document.querySelector('.submit-card').hidden = false;
@@ -2014,6 +2072,7 @@ on('#fill', async () => {
   await runPages();
 });
 on('#continue', async () => {
+  if (state.running) throw new Error('An application workflow is already running.');
   state.log = [];
   state.startedAt ||= Date.now() - 10 * 60_000;
   await runPages();

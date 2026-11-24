@@ -34,7 +34,7 @@ async function wordAction(fn) {
 }
 
 async function loadWordLists() {
-  const [evidence, history] = await Promise.all([api('/api/evidence'), api(wordBase)]);
+  const [evidence, history, session] = await Promise.all([api('/api/evidence'), api(wordBase), chrome.storage.session.get('lastWordReview')]);
   const source = $('#docxSource');
   const previous = source.value;
   source.replaceChildren(option('', 'Select an original DOCX'));
@@ -49,7 +49,8 @@ async function loadWordLists() {
     const label = [review.job.title, review.job.company].filter(Boolean).join(' · ') || 'Untitled posting';
     saved.append(option(review.id, label + ' · ' + new Date(review.createdAt).toLocaleString()));
   }
-  saved.value = wordReview?.id || '';
+  const last = wordReview?.id || session.lastWordReview;
+  saved.value = history.reviews.some((review) => review.id === last) ? last : '';
 }
 
 function wordList(parent, title, items, render) {
@@ -219,7 +220,13 @@ $('#docxClearAttachment').addEventListener('click', clearWordAttachment);
 on('#docxLoadLists', () => wordAction(loadWordLists));
 on('#docxResearch', () => wordAction(async () => {
   wordStatus('Researching the employer using public sources…');
-  const { research } = await api('/api/docx/research', { method: 'POST', body: { job: currentJob(), useModel: $('#docxUseModel').checked } });
+  const input = () => ({ job: currentJob(), companyUrl: $('#companyUrl').value.trim(), useModel: $('#docxUseModel').checked });
+  const body = input();
+  const { research } = await api('/api/docx/research', { method: 'POST', body });
+  if (JSON.stringify(body) !== JSON.stringify(input())) {
+    wordStatus('The posting changed during research. Run research for the current posting.');
+    return;
+  }
   wordStatus(research ? 'Public sources saved for this job. Analyze the posting to review them beside the requirements.' : 'No attributable company information was found. You can analyze the posting now.');
 }));
 on('#docxAnalyze', () => wordAction(async () => {
@@ -230,7 +237,27 @@ on('#docxAnalyze', () => wordAction(async () => {
   $('#docxArtifacts').hidden = true;
   wordStatus('Analyzing the posting and generating evidence-linked proposals…');
   const job = currentJob();
-  const review = await api(wordBase, { method: 'POST', body: { sourceId, job, useModel: $('#docxUseModel').checked } });
+  const useModel = $('#docxUseModel').checked;
+  const fingerprint = async (data) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(data)))),
+    (byte) => byte.toString(16).padStart(2, '0')).join('');
+  const key = await fingerprint([sourceId, job, useModel]);
+  const { wordRequest } = await chrome.storage.session.get('wordRequest');
+  const requestId = wordRequest?.key === key ? wordRequest.id : crypto.randomUUID();
+  await chrome.storage.session.set({ wordRequest: { id: requestId, key } });
+  let review;
+  try {
+    review = await api(wordBase, { method: 'POST', body: { sourceId, job, useModel, requestId } });
+  } catch (error) {
+    if (error.code) await chrome.storage.session.remove('wordRequest');
+    throw error;
+  }
+  await chrome.storage.session.set({ lastWordReview: review.id });
+  await chrome.storage.session.remove('wordRequest');
+  if (sourceId !== $('#docxSource').value || useModel !== $('#docxUseModel').checked || JSON.stringify(job) !== JSON.stringify(currentJob())) {
+    wordStatus('Saved the completed review for the earlier posting. Analyze the current posting to continue.');
+    await loadWordLists();
+    return;
+  }
   wordJob = JSON.stringify(job);
   renderWordReview({ review });
   wordStatus(review.proposals.length ? 'Awaiting review. Accept or reject every proposal.' : 'Review complete. No supported changes were found.');
@@ -240,7 +267,10 @@ on('#docxOpenReview', () => wordAction(async () => {
   const id = $('#docxSavedReview').value;
   if (!id) throw new Error('Choose a saved review.');
   const saved = await api(wordBase + '/' + id);
+  await chrome.storage.session.set({ lastWordReview: id });
   invalidateWordAttachment();
+  clearCurrentResearch();
+  $('#companyUrl').value = '';
   for (const field of ['title', 'company', 'location', 'description']) {
     const selector = field === 'description' ? '#jobDesc' : '#job' + field[0].toUpperCase() + field.slice(1);
     $(selector).value = saved.review.job[field];

@@ -139,6 +139,12 @@ function clearSubmissionReview() {
   $('#submit').disabled = true;
 }
 
+chrome.tabs.onUpdated.addListener((id, changes) => {
+  if (state.submission?.tabId !== id || (!changes.url && changes.status !== 'loading')) return;
+  clearSubmissionReview();
+  $('#submitOut').textContent = 'The application page changed. Review the current form again.';
+});
+
 async function reviewApplication() {
   if (state.fillActive) throw new Error('Finish or stop filling before review');
   clearSubmissionReview();
@@ -206,9 +212,10 @@ on('#pairServer', async () => {
   const server = $('#serverUrl').value.trim().replace(/\/$/, '');
   const token = $('#apiToken').value.trim();
   if (!loopback(server) || !/^[a-f0-9]{64}$/.test(token)) throw new Error('Enter a loopback URL and the token from your private backend configuration');
+  await api('/api/health', {}, { server, token });
+  await chrome.storage.local.set({ server, apiToken: token });
   SERVER = server;
   API_TOKEN = token;
-  await chrome.storage.local.set({ server, apiToken: token });
   $('#apiToken').value = '';
   await checkServer();
 });
@@ -234,7 +241,6 @@ $('#grantSite').addEventListener('click', () => {
 chrome.tabs.onActivated.addListener(updateSitePermission);
 chrome.tabs.onUpdated.addListener(updateSitePermission);
 updateSitePermission();
-chrome.storage.local.setAccessLevel?.({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(() => {});
 chrome.storage.session.get('applicationActivity').then((stored) => {
   if (Array.isArray(stored.applicationActivity)) renderActivity(stored.applicationActivity);
 });

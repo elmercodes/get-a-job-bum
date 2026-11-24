@@ -86,7 +86,8 @@
       <details class="card section" id="researchCard">
         <summary><span class="num">🔎</span>Company research<span class="sum-meta" id="researchMeta"></span></summary>
         <div class="section-body">
-          <p class="hint">What the company does, recent news, stack, interview focus, red flags, how you fit, and an angle for your application. Facts come only from sources listed at the bottom.</p>
+          <label class="field">Employer website (optional)<input id="companyUrl" type="url" placeholder="https://employer.example" /></label>
+          <label class="row"><input id="researchModel" type="checkbox" /> Use my configured provider to rank public excerpts</label>
           <div class="row">
             <button id="research" class="btn ghost">Research this company</button>
             <button id="refreshResearch" class="btn ghost sm" title="Research again instead of using this week's saved result">↻ Fresh</button>

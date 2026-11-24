@@ -133,28 +133,26 @@ try {
       pagePreference: 'preserve', includePdf: true }), { code: 'LAYOUT_TEXT_LOSS' });
   }
   const { researchPublicJob } = await import('../src/research.js');
-  const fetchBefore = globalThis.fetch;
   const origins = [];
-  try {
-    globalThis.fetch = async (uri, options) => {
-      const url = new URL(uri);
-      origins.push(url.hostname);
-      assert.equal(options.redirect, 'error');
-      assert.ok(!url.href.includes('127.0.0.1'));
-      if (url.hostname === 'news.google.com') return new Response('<item><title>Fictional public release</title><link>https://news.example.test/demo</link><pubDate>' + new Date().toUTCString() + '</pubDate></item>');
-      if (url.pathname.endsWith('api.php')) return Response.json({ search: [{ id: 'Q42', label: 'Fictional Employer', description: 'Fictional company' }] });
-      if (url.pathname.endsWith('Q42.json')) return Response.json({ entities: { Q42: { sitelinks: { enwiki: { title: 'Fictional demonstration' } } } } });
-      return Response.json({ extract: 'A public fictional company example.', content_urls: { desktop: { page: 'https://en.wikipedia.org/wiki/Fictional_demonstration' } } });
-    };
-    const publicFacts = await researchPublicJob({ ...job, description: job.description + ' See http://127.0.0.1:1/.' });
-    assert.equal(publicFacts.observations.length, 2);
-    assert.deepEqual([...new Set(origins)].sort(), ['en.wikipedia.org', 'news.google.com', 'www.wikidata.org']);
-    const count = origins.length;
-    assert.equal((await researchPublicJob(job)).summary, publicFacts.summary);
-    assert.equal(origins.length, count);
-  } finally {
-    globalThis.fetch = fetchBefore;
-  }
+  const read = async (uri, options) => {
+    const url = new URL(uri);
+    origins.push(url.hostname);
+    assert.equal(options.maxRedirects, 0);
+    assert.ok(options.allow(url));
+    assert.ok(!url.href.includes('127.0.0.1'));
+    let payload;
+    if (url.hostname === 'news.google.com') payload = '<item><title>Fictional public release</title><link>https://news.example.com/demo</link><pubDate>' + new Date().toUTCString() + '</pubDate></item>';
+    else if (url.pathname.endsWith('api.php')) payload = { search: [{ id: 'Q42', label: 'Fictional Employer', description: 'Fictional company' }] };
+    else if (url.pathname.endsWith('Q42.json')) payload = { entities: { Q42: { sitelinks: { enwiki: { title: 'Fictional demonstration' } } } } };
+    else payload = { extract: 'A public fictional company example.' };
+    return { url: url.href, ok: true, text: typeof payload === 'string' ? payload : JSON.stringify(payload) };
+  };
+  const publicFacts = await researchPublicJob({ ...job, description: job.description + ' See http://127.0.0.1:1/.' }, { read });
+  assert.equal(publicFacts.observations.length, 2);
+  assert.deepEqual([...new Set(origins)].sort(), ['en.wikipedia.org', 'news.google.com', 'www.wikidata.org']);
+  const count = origins.length;
+  assert.equal((await researchPublicJob(job, { read })).summary, publicFacts.summary);
+  assert.equal(origins.length, count);
   console.log('docx transactions: grounded reorder and removal, partial pairs, corrupted staging, forced process interruption, stale evidence, and pagination handling passed');
 } finally {
   if (worker && worker.exitCode === null && worker.signalCode === null) {

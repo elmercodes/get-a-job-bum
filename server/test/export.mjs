@@ -4,7 +4,8 @@ import ExcelJS from 'exceljs';
 import { exportWorkbook } from '../src/export.js';
 
 const buf = await exportWorkbook({
-  jobs: [{ title: 'SDE Intern', company: 'Acme', url: 'https://acme.com/1', score: 82 }, { title: 'Bad link', url: 'javascript:alert(1)', score: 10 }],
+  jobs: [{ title: 'SDE Intern', company: 'Acme', url: 'https://acme.com/1', score: 82 }, { title: 'Bad link', url: 'javascript:alert(1)', score: 10 },
+    { title: 'Embedded credentials', url: 'https://fixture:example@fictional.example.com/1' }],
   hackathons: [{ title: 'Hack', url: 'https://h.dev', deadline: new Date(Date.now() + 2 * 86400000).toISOString(), mode: 'online' }],
   applications: [{ company: 'Acme', title: 'SDE Intern', status: 'offer', url: 'https://acme.com/1', createdAt: new Date().toISOString() }],
 });
@@ -14,6 +15,7 @@ assert.deepEqual(wb.worksheets.map((w) => w.name), ['Jobs', 'Hackathons', 'Track
 const jobs = wb.getWorksheet('Jobs');
 assert.equal(jobs.getRow(2).getCell(7).value.hyperlink, 'https://acme.com/1');
 assert.equal(jobs.getRow(3).getCell(7).value, '');
+assert.equal(jobs.getRow(4).getCell(7).value, '');
 assert.equal(jobs.getRow(2).getCell(1).fill.fgColor.argb, 'FFDCFCE7'); // 82: green
 assert.equal(jobs.getRow(3).getCell(1).fill.fgColor.argb, 'FFFEE2E2'); // 10: red
 assert.equal(wb.getWorksheet('Hackathons').getRow(2).getCell(6).fill.fgColor.argb, 'FFFEE2E2'); // closes in 2 days: red
@@ -25,3 +27,14 @@ const one = new ExcelJS.Workbook();
 await one.xlsx.load(await exportWorkbook({ hackathons: [{ title: 'Hack', url: 'https://h.dev' }], only: 'hackathons' }));
 assert.deepEqual(one.worksheets.map((w) => w.name), ['Hackathons']);
 console.log('export (one sheet): ok');
+
+// The conditional-formatting serializer calls ExcelJS's overridden UUID dependency.
+const conditional = new ExcelJS.Workbook();
+const numbers = conditional.addWorksheet('Fictional scores');
+numbers.addRows([[10], [20]]);
+numbers.addConditionalFormatting({ ref: 'A1:A2', rules: [{ type: 'dataBar', color: { argb: 'FF2865DB' },
+  cfvo: [{ type: 'min' }, { type: 'max' }] }] });
+const reopened = new ExcelJS.Workbook();
+await reopened.xlsx.load(await conditional.xlsx.writeBuffer());
+assert.equal(reopened.getWorksheet('Fictional scores').conditionalFormattings[0].rules[0].type, 'dataBar');
+console.log('export: patched ExcelJS UUID path and conditional-format round trip passed');

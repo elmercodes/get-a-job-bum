@@ -64,7 +64,7 @@ The Python tests require Playwright and an unpacked-compatible Chrome build. The
 
 The dependency audit on this branch reports two inherited moderate findings in ExcelJS and its UUID dependency. It reports zero high or critical findings. The optional local renderer is maintained by the OS package manager. The application uses filesystem permissions and does not manage an encryption key. Continue to use a private storage location and heed the [security and privacy notes](SECURITY_PRIVACY.md).
 
-The older Company research card still accepts links from the posting. Its URL-fetching policy needs a separate network-boundary review before public release. The new Word research route contacts only fixed public origins.
+Phase 3 left the older Company research card's URL-fetching policy open for review. Phase 4 supersedes this behavior and shares a validated public reader between both research panels.
 
 ## Changed files
 

@@ -59,7 +59,9 @@ Use manual paste for LinkedIn and Indeed descriptions. Do not implement unauthor
 
 Support local models where practical. For cloud providers show: service identity, what data will be sent (job text, selected user facts, approved evidence), whether screenshots are included, and potential API cost. Consumer subscriptions may not include API usage. Never silently switch providers or share more data through fallback. Audit provider retention policies separately, and document that sending a resume to cloud AI is a deliberate privacy tradeoff.
 
-The [Word tailoring workflow](PHASE_3.md) defaults to local evidence ranking. Model ranking is opt-in and sends bounded posting excerpts and approved wording to the authorized provider. Public research uses fixed HTTPS sources and sends no applicant records. Word originals, reviews, staged files and validated artifacts share the private application-data root. Default artifact names are ignored in Git. The local Linux renderer uses an isolated filesystem, a private profile and no network. Exported copies should be kept in a private user-controlled location.
+The [Word tailoring workflow](PHASE_3.md) defaults to local evidence ranking. Model ranking is opt-in and sends bounded posting excerpts and approved wording to the authorized provider. Public research uses fixed reference hosts and a validated employer website when available. It sends no applicant records. Word originals, reviews, staged files and validated artifacts share the private application-data root. Default artifact names are ignored in Git. The local Linux renderer uses an isolated filesystem, a private profile and no network. Exported copies should be kept in a private user-controlled location.
+
+The [Phase 4 URL audit](PHASE_4.md) records the public fetch boundary, Chrome pairing protections and release checks. Background mail and model-assisted mail categorization each require a distinct explicit setting.
 
 ## 7. Logging and diagnostics
 

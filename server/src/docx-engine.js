@@ -19,7 +19,7 @@ export class DocxError extends Error {
     super(message);
     this.code = code;
     this.details = details;
-    this.status = ['STALE_SOURCE', 'STALE_EVIDENCE', 'STALE_JOB', 'VERSION_CONFLICT'].includes(code) ? 409 : 422;
+    this.status = ['STALE_SOURCE', 'STALE_EVIDENCE', 'STALE_JOB', 'VERSION_CONFLICT', 'REQUEST_CONFLICT'].includes(code) ? 409 : 422;
   }
 }
 
@@ -175,6 +175,7 @@ function paragraphInfo(xml, node, chain, section, styles) {
 
 function inspect(xml, styles) {
   const root = parseXml(xml);
+  checkDynamicFields(root);
   if (!word(root, 'document') || root.children.filter((item) => word(item, 'body')).length !== 1) {
     throw new DocxError('UNSUPPORTED_WORD', 'This source requires a transitional WordprocessingML document body.');
   }
@@ -235,6 +236,35 @@ function checkRelationships(root, name) {
   return document;
 }
 
+function checkDynamicFields(root) {
+  const fields = [];
+  let orphan = '';
+  const check = (text) => {
+    const instruction = text.replace(/\p{Cf}/gu, '').trim();
+    if (/^(?:DDE(?:AUTO)?|INCLUDE(?:TEXT|PICTURE)|LINK|DATABASE|IMPORT|RD|EMBED|MACROBUTTON)\b/i.test(instruction)) {
+      throw new DocxError('ACTIVE_FIELD', 'This document contains an active field that can load external content. Select a static copy.');
+    }
+  };
+  visit(root, (node) => {
+    if (word(node, 'fldSimple')) check(attribute(node, 'instr') || '');
+    if (word(node, 'fldChar')) {
+      const type = attribute(node, 'fldCharType');
+      if (type === 'begin') fields.push('');
+      else if (fields.length && ['separate', 'end'].includes(type)) {
+        check(fields.at(-1));
+        if (type === 'end') fields.pop();
+        else fields[fields.length - 1] = '';
+      }
+    }
+    if (word(node, 'instrText') || word(node, 'delInstrText')) {
+      if (fields.length) fields[fields.length - 1] += node.text;
+      else orphan += node.text;
+    }
+  });
+  check(orphan);
+  fields.forEach(check);
+}
+
 export async function readDocx(buffer) {
   if (!Buffer.isBuffer(buffer) || buffer.length > 6 * 1024 * 1024) throw new DocxError('SIZE_LIMIT', 'The Word file exceeds the size limit.');
   try {
@@ -266,6 +296,7 @@ export async function readDocx(buffer) {
     if (name === PART) { main = decode(data); continue; }
     if (/\.(?:xml|rels)$/i.test(name)) {
       const root = parseXml(decode(data));
+      checkDynamicFields(root);
       if (name.endsWith('.rels')) {
         if (checkRelationships(root, name)) authorizedMain = true;
       }

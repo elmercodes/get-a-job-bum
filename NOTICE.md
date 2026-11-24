@@ -6,4 +6,6 @@ The local resume extraction helper in [server/src/vendor/resume-extraction.js](s
 
 The Phase 3 Word editor was implemented independently after reviewing the DOCX editing and approval design at that same Application Assistant revision. It uses JSZip 3.10.2 under its MIT option and Saxes 5.0.1 under ISC. The installed packages include their license notices.
 
+ExcelJS uses UUID 11.1.1 under MIT through a pinned transitive override. Its older transitive `buffers` 0.1.1 tarball predates the author's MIT/X11 metadata. The installed main source matches the archived upstream licensing revision. [Upstream buffers licensing revision](https://github.com/bitpay/node-buffers/commit/1b745ee35d33eb166e15ef1866073a07c6d7de87)
+
 AutoApply provided conceptual inspiration only. The project includes no AutoApply implementation.

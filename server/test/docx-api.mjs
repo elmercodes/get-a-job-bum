@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { once } from 'node:events';
@@ -18,12 +18,14 @@ const source = await makeDocx();
 let calls = 0;
 let forged = false;
 let rankedInput;
+let requestPause;
 const mock = http.createServer(async (request, response) => {
   let text = '';
   for await (const chunk of request) text += chunk;
   const input = JSON.parse(text);
   calls++;
   rankedInput = JSON.parse(input.messages[1].content);
+  if (requestPause) await requestPause();
   const target = rankedInput.targets.find((item) => item.candidates.some((candidate) => candidate.text.includes('12.50%')));
   const option = target?.candidates.find((candidate) => candidate.text.includes('12.50%'));
   const selection = { targetId: target?.id, candidateId: option?.id, requirementIds: option?.requirementIds };
@@ -115,15 +117,19 @@ try {
   const sourceId = state.sources[0].id;
   assert.ok(state.records.some((record) => record.provenance.kind === 'import' && record.status !== 'approved'));
 
-  const cache = path.join(directory, 'research', 'public-fictional-south-labs--data-engineer.json');
+  const cache = path.join(directory, 'research', 'verified-fictional-south-labs--data-engineer.json');
   const companySource = 'https://fictional-research.example.test/company';
-  await fs.writeFile(cache, JSON.stringify({ at: Date.now(), company: 'Fictional South Labs', role: 'Data Engineer',
-    method: 'public_sources', sources: [{ title: 'Fictional company source', url: companySource }],
-    observations: [{ title: 'Fictional company source', url: companySource, text: 'Fictional public observation.' }] }));
+  await fs.writeFile(cache, JSON.stringify({ schemaVersion: 2, at: Date.now(), company: 'Fictional South Labs', role: 'Data Engineer',
+    method: 'public_sources', selected: [1], sources: [{ id: 1, kind: 'reference', retrievedAt: new Date().toISOString(),
+      title: 'Fictional company source', url: companySource, text: 'Fictional public observation.' }] }));
   const research = await post('/docx/research', { job });
   assert.equal(research.research.observations[0].text, 'Fictional public observation.');
 
-  const local = await post(reviews, { sourceId, job }, 201);
+  const localRequest = { sourceId, job, requestId: randomUUID() };
+  const [local, repeatedRequest] = await Promise.all([post(reviews, localRequest, 201), post(reviews, localRequest, 201)]);
+  assert.equal(local.id, repeatedRequest.id);
+  assert.equal(local.id, localRequest.requestId);
+  assert.equal((await post(reviews, { ...localRequest, job: { ...job, title: 'Another role' } }, 409)).code, 'REQUEST_CONFLICT');
   assert.equal(local.model.method, 'local_selection');
   assert.equal(calls, 0, 'local analysis does not call the provider');
   assert.equal(local.job.title, 'Data Engineer');
@@ -211,6 +217,7 @@ try {
 
   await stop();
   await start({ renderer: false });
+  assert.equal((await post(reviews, localRequest, 201)).id, local.id);
   assert.equal((await api(endpoint)).versions[0].id, first.id);
   assert.deepEqual(await api(version + '/file/docx'), docx);
   await expected('PAGE_LIMIT_UNVERIFIED', { ...exportRequest, pagePreference: 'one-page' });
@@ -225,11 +232,31 @@ try {
   await expected('STALE_EVIDENCE', exportRequest, 409);
   assert.equal((await post(endpoint + '/versions/' + offlineVersion.id + '/attachment', { job }, 409)).code, 'STALE_EVIDENCE');
   await api(version + '/file/docx');
+  forged = false;
+  let reached;
+  let unblock;
+  const started = new Promise((resolve) => { reached = resolve; });
+  const hold = new Promise((resolve) => { unblock = resolve; });
+  requestPause = async () => { reached(); await hold; };
+  const interrupted = { sourceId, job, requestId: randomUUID(), useModel: true };
+  const attempt = post(reviews, interrupted, 201).then(() => 'unexpected result', () => 'interrupted');
+  await started;
+  await stop();
+  unblock();
+  requestPause = null;
+  assert.equal(await attempt, 'interrupted');
+  await start({ renderer: false });
+  assert.ok(!(await api(reviews)).reviews.some((r) => r.id === interrupted.requestId));
+  const recovered = await post(reviews, interrupted, 201);
+  assert.equal(recovered.id, interrupted.requestId);
+  assert.equal(recovered.model.method, 'model_selection');
+  assert.equal((await post(reviews, interrupted, 201)).id, recovered.id);
+  assert.equal((await api(reviews)).reviews.filter((r) => r.id === interrupted.requestId).length, 1);
   const removed = await api('/evidence/sources/' + sourceId, { method: 'DELETE', body: { revision: state.revision } });
   assert.equal(removed.sources.length, 0);
   await api(version + '/file/docx', { status: 404 });
   assert.deepEqual((await api(reviews)).reviews, []);
-  console.log('docx API: authenticated import, local and model evidence, exact approvals, atomic/deduplicated export, private downloads, stale checks and restart passed');
+  console.log('docx API: paired import, local and model evidence, exact approvals, atomic exports, idempotent review, interrupted generation, private downloads and stale checks passed');
 } finally {
   await stop();
   mock.close();

@@ -18,6 +18,7 @@ const stagingRoot = path.join(root, 'staging');
 const reviewPattern = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const variantPattern = /^[a-f0-9]{64}$/;
 const pending = new Map();
+const pendingReviews = new Map();
 const engineVersion = '1';
 
 function initialize() {
@@ -93,13 +94,35 @@ function evidenceBrief(strategy, proposals) {
 export async function createDocxReview(input) {
   if (!input || typeof input.sourceId !== 'string') throw new DocxError('INVALID_REVIEW', 'Select an original DOCX and supply the posting.');
   const job = jobSnapshot(input.job);
-  const original = readSource(input.sourceId);
+  const { sourceId, requestId, useModel } = input;
+  if (requestId !== undefined && (typeof requestId !== 'string' || !reviewPattern.test(requestId))) {
+    throw new DocxError('INVALID_REVIEW', 'Start a new Word review with a valid request identifier.');
+  }
+  const id = requestId || randomUUID();
+  const scope = hash(JSON.stringify([sourceId, jobFingerprint(job), useModel === true]));
+  const active = pendingReviews.get(id);
+  const saved = readJSON(path.join(checkedReview(id), 'review.json'), null);
+  if ((active && active.scope !== scope) || (saved && saved.requestScope !== scope)) {
+    throw new DocxError('REQUEST_CONFLICT', 'This review request belongs to another source, posting, or model selection. Start a fresh review.');
+  }
+  if (active) return active.work;
+  if (saved) {
+    freshness(saved, job);
+    return saved;
+  }
+  const work = generateReview({ id, scope, sourceId, useModel, job }).finally(() => pendingReviews.delete(id));
+  pendingReviews.set(id, { scope, work });
+  return work;
+}
+
+async function generateReview({ id, scope, sourceId, useModel, job }) {
+  const original = readSource(sourceId);
   const doc = await readDocx(original.bytes);
   const evidence = loadEvidence();
   const strategy = buildStrategy(doc, evidence, job);
   let selections;
   let model = { method: 'local_selection' };
-  if (input.useModel === true && strategy.targets.length) {
+  if (useModel === true && strategy.targets.length) {
     const provider = describeProvider();
     try {
       const result = await chatJSON(strategyPrompt, JSON.stringify(modelInput(strategy)),
@@ -117,7 +140,7 @@ export async function createDocxReview(input) {
     if (issue && issue !== 'empty_paragraph') readOnly[issue] = (readOnly[issue] || 0) + 1;
   }
   const review = {
-    id: randomUUID(), engineVersion, job, jobKey: jobFingerprint(job), evidenceRevision: evidence.revision,
+    id, requestScope: scope, engineVersion, job, jobKey: jobFingerprint(job), evidenceRevision: evidence.revision,
     source: { id: original.source.id, name: original.source.name, sha256: original.source.sha256 },
     createdAt: new Date().toISOString(), model,
     requirements: strategy.requirements, terminology: strategy.terminology,
@@ -128,7 +151,7 @@ export async function createDocxReview(input) {
   freshness(review);
   initialize();
   const dir = checkedReview(review.id);
-  fs.mkdirSync(dir, { mode: 0o700 });
+  fs.mkdirSync(dir, { mode: 0o700, recursive: true });
   writeJSON(path.join(dir, 'review.json'), review);
   return review;
 }
