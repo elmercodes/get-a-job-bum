@@ -14,13 +14,20 @@ function validateDocx(buffer) {
     const invalid = () => reject(new UploadError('Invalid or unsupported DOCX archive'));
     yauzl.fromBuffer(buffer, { lazyEntries: true, strictFileNames: true }, (error, zip) => {
       if (error) return invalid();
-      const fail = () => { zip.close(); invalid(); };
+      let failed = false;
+      const fail = () => {
+        if (failed) return;
+        failed = true;
+        zip.close();
+        invalid();
+      };
       const parts = new Set();
       let expanded = 0;
+      let decoded = 0;
       zip.on('error', fail);
       zip.on('end', () => {
         zip.close();
-        if (!parts.has('[Content_Types].xml') || !parts.has('word/document.xml')) return invalid();
+        if (failed || !parts.has('[Content_Types].xml') || !parts.has('word/document.xml')) return invalid();
         resolve();
       });
       zip.on('entry', (entry) => {
@@ -29,14 +36,26 @@ function validateDocx(buffer) {
         if (parts.has(name) || expanded > MAX_EXPANDED ||
             entry.isEncrypted() || /(?:^|\/)(?:embeddings\/|activex\/)|vbaProject\.bin$/i.test(name)) return fail();
         parts.add(name);
-        if (!/\.(?:xml|rels)$/i.test(name)) return zip.readEntry();
-        if (entry.uncompressedSize > 4 * 1024 * 1024) return fail();
+        const markup = /\.(?:xml|rels)$/i.test(name);
+        const partLimit = 4 * 1024 * 1024;
+        if (markup && entry.uncompressedSize > partLimit) return fail();
+        if (name.endsWith('/') && entry.uncompressedSize === 0) return zip.readEntry();
         zip.openReadStream(entry, (streamError, stream) => {
           if (streamError) return fail();
           const chunks = [];
+          let partSize = 0;
           stream.on('error', fail);
-          stream.on('data', (chunk) => chunks.push(chunk));
+          stream.on('data', (chunk) => {
+            decoded += chunk.length;
+            partSize += chunk.length;
+            if (decoded > MAX_EXPANDED || (markup && partSize > partLimit)) {
+              stream.destroy();
+              fail();
+            } else if (markup) chunks.push(chunk);
+          });
           stream.on('end', () => {
+            if (failed) return;
+            if (!markup) return zip.readEntry();
             const xml = Buffer.concat(chunks).toString('utf8');
             // Reject declarations and non-UTF-8 parts before forwarding the archive to the parser.
             if (/[\x00\uFFFD]|<!DOCTYPE|<!ENTITY/i.test(xml)) return fail();

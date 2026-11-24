@@ -4,7 +4,8 @@
   "description": "Local server for Auto Job: tailors ATS-friendly resumes and cover letters, answers application forms from your profile, reads email OTPs. Runs on your own laptop.",
   "main": "index.js",
   "scripts": {
-    "test": "node test/security.mjs && node test/phase1.mjs && node test/evidence.mjs && node test/provider-privacy.mjs && node test/export.mjs && node test/jobcheck.mjs && node test/amazon-answers.mjs && node test/panel-smoke.mjs && node test/run-all.mjs",
+    "test": "node test/security.mjs && node test/phase1.mjs && node test/evidence.mjs && node test/provider-privacy.mjs && npm run test:docx && node test/export.mjs && node test/jobcheck.mjs && node test/amazon-answers.mjs && node test/panel-smoke.mjs && node test/run-all.mjs",
+    "test:docx": "node test/docx-engine.mjs && node test/docx-api.mjs && node test/docx-transaction.mjs",
     "start": "node src/index.js",
     "dev": "node --watch src/index.js"
   },
@@ -29,12 +30,14 @@
     "exceljs": "^4.4.0",
     "express": "^4.22.3",
     "imapflow": "^2.10.0",
+    "jszip": "3.10.2",
     "mailparser": "^3.14.1",
     "mammoth": "^1.13.0",
     "multer": "2.5.0",
     "nodemailer": "^10.3.1",
     "pdf-parse": "^1.1.1",
     "pdfkit": "^0.20.2",
+    "saxes": "5.0.1",
     "yauzl": "3.4.0"
   },
   "repository": {

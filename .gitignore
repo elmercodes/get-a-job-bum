@@ -62,5 +62,7 @@ server/test/reports/
 
 # Default names for private evidence archives exported from the app.
 applicant-evidence*.json
+tailored-resume-*.docx
+tailored-resume-*.pdf
 /profile.json
 /server/profile.json

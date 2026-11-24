@@ -66,13 +66,13 @@ function requireProviderAuthorization(name) {
   if (!allowed.includes(name)) throw new Error('Authorize this cloud provider in your private server configuration first');
 }
 
-export async function chatJSON(system, user, { temperature = 0.2, heavy = false, budgetMs, images = [], search = false } = {}) {
+export async function chatJSON(system, user, { temperature = 0.2, heavy = false, budgetMs, images = [], search = false, fallback = true } = {}) {
   try {
-    return await primaryJSON(system, user, { temperature, heavy, budgetMs, images, search });
+    return await primaryJSON(system, user, { temperature, heavy, budgetMs, images, search, fallback });
   } catch (e) {
     // Quota gone, key dead or everything overloaded: walk the configured OpenAI-compatible fallbacks
     // (FALLBACK_PROVIDERS=groq,openrouter,litellm,...). The visual check and research stay Gemini-only.
-    if (images.length || search) throw e;
+    if (images.length || search || !fallback) throw e;
     const fb = await fallbackJSON(system, user, temperature, e);
     if (fb !== undefined) return fb;
     throw e;
@@ -103,7 +103,7 @@ async function fallbackJSON(system, user, temperature, primaryError) {
   return undefined;
 }
 
-async function primaryJSON(system, user, { temperature, heavy, budgetMs, images, search }) {
+async function primaryJSON(system, user, { temperature, heavy, budgetMs, images, search, fallback }) {
   const p = provider();
   // A stronger, separate model for quality-critical calls, when HEAVY_LLM_PROVIDER is configured.
   const heavyProvider = heavy && !images.length && !search ? (process.env.HEAVY_LLM_PROVIDER || '').toLowerCase() : '';
@@ -125,20 +125,20 @@ async function primaryJSON(system, user, { temperature, heavy, budgetMs, images,
   if (images.length && p !== 'gemini') throw new Error('The visual check needs Gemini (LLM_PROVIDER=gemini)');
   if (p === 'gemini') {
     try {
-      text = (await gemini(system, user, temperature, heavy, budgetMs ?? (heavy ? 150000 : 60000), images)).text;
+      text = (await gemini(system, user, temperature, heavy, budgetMs ?? (heavy ? 150000 : 60000), images, false, fallback)).text;
     } catch (e) {
       // Free Gemini quota gone or every model overloaded: use the local Ollama model if it's running.
-      if (images.length || process.env.OLLAMA_FALLBACK === 'off' || !(await ollamaUp())) throw e;
+      if (!fallback || images.length || process.env.OLLAMA_FALLBACK === 'off' || !(await ollamaUp())) throw e;
       console.warn('Configured model request unavailable');
       lastFallbackAt = Date.now();
       text = await ollama(system, user, temperature);
     }
   }
-  else if (p === 'ollama') text = await ollama(system, user, temperature, heavy ? process.env.OLLAMA_HEAVY_MODEL : undefined);
-  else if (p === 'anthropic') text = await anthropic(system, user, temperature, heavy ? process.env.ANTHROPIC_HEAVY_MODEL : undefined);
+  else if (p === 'ollama') text = await ollama(system, user, temperature, heavy ? process.env.OLLAMA_HEAVY_MODEL : undefined, budgetMs);
+  else if (p === 'anthropic') text = await anthropic(system, user, temperature, heavy ? process.env.ANTHROPIC_HEAVY_MODEL : undefined, budgetMs);
   else {
     const cfg = compatCfg(p);
-    text = await openaiCompatible(system, user, temperature, cfg ? cfg.model : heavy ? process.env.OPENAI_HEAVY_MODEL : undefined, cfg || undefined);
+    text = await openaiCompatible(system, user, temperature, cfg ? cfg.model : heavy ? process.env.OPENAI_HEAVY_MODEL : undefined, cfg || undefined, budgetMs);
   }
   return parseJSON(text);
 }
@@ -153,12 +153,12 @@ export function geminiStatus() {
   return [...resting].filter(([, t]) => t > now).map(([m, t]) => ({ model: m, minutes: Math.round((t - now) / 60000) }));
 }
 
-async function gemini(system, user, temperature, heavy, budgetMs, images = [], search = false) {
+async function gemini(system, user, temperature, heavy, budgetMs, images = [], search = false, fallback = true) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error('GEMINI_API_KEY is not set in server/.env');
   const main = (heavy && process.env.GEMINI_HEAVY_MODEL) || describeProvider().model;
   const extra = (process.env.GEMINI_FALLBACK_MODELS || process.env.GEMINI_FALLBACK_MODEL || '').split(',').map((m) => m.trim());
-  const chain = [...new Set([main, ...extra, ...DEFAULT_CHAIN].filter(Boolean))];
+  const chain = [...new Set([main, ...(fallback ? [...extra, ...DEFAULT_CHAIN] : [])].filter(Boolean))];
   const ready = chain.filter((m) => !(resting.get(m) > Date.now()));
   // Search grounding is refused outright on free keys: try one model and fail fast, without resting any model.
   const models = search ? (ready.length ? ready : chain).slice(0, 1) : ready.length ? ready : chain; // everything resting: try anyway
@@ -237,11 +237,11 @@ async function ollamaUp() {
   return fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(1500), redirect: 'error' }).then((r) => r.ok).catch(() => false);
 }
 
-async function ollama(system, user, temperature, model) {
+async function ollama(system, user, temperature, model, budgetMs) {
   requireProviderAuthorization('ollama');
   const base = process.env.OLLAMA_URL || 'http://localhost:11434';
   const res = await fetch(`${base}/api/chat`, {
-    method: 'POST', redirect: 'error',
+    method: 'POST', redirect: 'error', signal: budgetMs ? AbortSignal.timeout(budgetMs) : undefined,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: model || process.env.OLLAMA_MODEL || 'qwen3.5:9b', // also used as the fallback when the provider is Gemini
@@ -261,7 +261,7 @@ async function ollama(system, user, temperature, model) {
   return (await res.json()).message.content;
 }
 
-async function openaiCompatible(system, user, temperature, model, cfg) {
+async function openaiCompatible(system, user, temperature, model, cfg, budgetMs) {
   if (cfg && !cfg.model) throw new Error(`${cfg.base}: no model configured (set its *_MODEL in server/.env)`);
   const base = cfg?.base || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
   const res = await fetch(`${base}/chat/completions`, {
@@ -270,7 +270,7 @@ async function openaiCompatible(system, user, temperature, model, cfg) {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${cfg ? cfg.key : process.env.OPENAI_API_KEY || ''}`,
     },
-    signal: AbortSignal.timeout(Number(process.env.OPENAI_TIMEOUT_MS || 60000)),
+    signal: AbortSignal.timeout(budgetMs ?? Number(process.env.OPENAI_TIMEOUT_MS || 60000)),
     body: JSON.stringify({
       model: model || cfg?.model || describeProvider().model,
       temperature,
@@ -285,9 +285,9 @@ async function openaiCompatible(system, user, temperature, model, cfg) {
   return (await res.json()).choices[0].message.content;
 }
 
-async function anthropic(system, user, temperature, model) {
+async function anthropic(system, user, temperature, model, budgetMs) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST', redirect: 'error',
+    method: 'POST', redirect: 'error', signal: budgetMs ? AbortSignal.timeout(budgetMs) : undefined,
     headers: {
       'Content-Type': 'application/json',
       'x-api-key': process.env.ANTHROPIC_API_KEY || '',

@@ -215,14 +215,14 @@ $('#evidenceSources').addEventListener('click', (event) => {
   busy(button, async () => {
     const endpoint = '/api/evidence/sources/' + source.id;
     if (button.dataset.sourceAction === 'download') return downloadEvidence(endpoint, source.name);
-    if (!window.confirm('Delete the original source and reopen linked facts for review?')) return;
+    if (!window.confirm('Delete the original source and its local Word reviews and exports, and reopen linked facts for review?')) return;
     updateEvidenceView(await api(endpoint, { method: 'DELETE', body: { revision: evidenceView.revision } }));
     renderProfile(await api('/api/profile'));
   })().catch(() => {});
 });
 on('#evidenceExport', () => downloadEvidence('/api/evidence/export', 'applicant-evidence.json'));
 on('#evidenceClear', async () => {
-  if (!window.confirm('Delete all applicant evidence, stored originals, and profile backups on this installation?')) return;
+  if (!window.confirm('Delete all applicant evidence, stored originals, local Word reviews and exports, and profile backups on this installation?')) return;
   const state = await api('/api/evidence', { method: 'DELETE', body: { revision: evidenceView.revision, confirmed: true } });
   updateEvidenceView(state);
   $('#evidenceForm').hidden = true;

@@ -1,4 +1,7 @@
 import 'dotenv/config';
+import docxRoutes from './docx-routes.js';
+import { DocxError } from './docx-engine.js';
+import { deleteDocxReviews } from './docx-service.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
@@ -61,6 +64,8 @@ const resumeUpload = multer({ storage: multer.memoryStorage(), limits: { ...uplo
 const documentUpload = multer({ storage: multer.memoryStorage(), limits: { ...uploadLimits, fileSize: 10 * 1024 * 1024, files: 1, parts: 4 } });
 const route = (fn) => (req, res, next) => fn(req, res).catch(next);
 
+app.use('/api/docx', docxRoutes);
+
 app.get('/api/health', (req, res) => res.json({ ok: true, llm: describeProvider(), heavy: describeHeavy(), resting: geminiStatus(), usingLocalAI: usedFallbackRecently(), gmail: mailEnabled && mailConfigured(), vision: visionEnabled, hasProfile: !!getProfile(), ai: aiUsage() }));
 
 // Read supported resume documents locally. The original bytes remain a separate private asset.
@@ -87,10 +92,16 @@ app.get('/api/evidence/sources/:id', (req, res) => {
   const { source, filename } = evidenceSource(req.params.id);
   res.attachment(source.name).type('application/octet-stream').sendFile(filename);
 });
-app.delete('/api/evidence/sources/:id', (req, res) => res.json(deleteEvidenceSource(req.params.id, req.body?.revision)));
+app.delete('/api/evidence/sources/:id', (req, res) => {
+  const evidence = deleteEvidenceSource(req.params.id, req.body?.revision);
+  deleteDocxReviews(req.params.id);
+  res.json(evidence);
+});
 app.delete('/api/evidence', (req, res) => {
   if (req.body?.confirmed !== true) return res.status(400).json({ error: 'Confirm deletion of the applicant evidence store' });
-  res.json(clearEvidence(req.body.revision));
+  const evidence = clearEvidence(req.body.revision);
+  deleteDocxReviews();
+  res.json(evidence);
 });
 
 app.post('/api/profile/import', resumeUpload.array('resume', 4), route(async (req, res) => {
@@ -599,6 +610,7 @@ app.delete('/api/applications/:id', (req, res) => {
 
 app.use((error, req, res, next) => {
   if (res.headersSent) return next(error);
+  if (error instanceof DocxError) return res.status(error.status).json({ error: error.message, code: error.code, details: error.details });
   if (error instanceof EvidenceError) return res.status(error.status).json({ error: error.message });
   if (error instanceof UploadError) return res.status(400).json({ error: error.message });
   if (error instanceof multer.MulterError) {

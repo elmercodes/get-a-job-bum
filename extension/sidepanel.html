@@ -99,10 +99,50 @@
         <summary><span class="num">2</span>Resume &amp; cover letter<span class="sum-meta" id="resumeMeta"></span></summary>
         <div class="section-body">
           <div class="row">
-            <button id="tailor" class="btn ghost">Tailor resume</button>
+            <button id="tailor" class="btn ghost">Generate resume with built-in PDF template</button>
             <button id="cover" class="btn ghost">Write cover letter</button>
           </div>
           <div id="tailorOut"></div>
+          <details id="docxPanel">
+            <summary>Tailor an existing Word resume</summary>
+            <p class="hint">Import a DOCX under Profile → Resume, then use the posting from Job details. Approve any extracted facts in Applicant evidence.</p>
+            <label class="field">Original Word resume<select id="docxSource"></select></label>
+            <label class="row"><input type="checkbox" id="docxUseModel"> Use my configured AI provider to rank shortlisted approved wording or public sources</label>
+            <div class="row">
+              <button id="docxResearch" class="btn ghost">Research employer using public sources</button>
+              <button id="docxAnalyze" class="btn primary">Analyze posting and propose edits</button>
+              <button id="docxLoadLists" class="btn ghost">Refresh sources and reviews</button>
+            </div>
+            <label class="field">Saved review<select id="docxSavedReview"></select></label>
+            <button id="docxOpenReview" class="btn ghost">Open saved review</button>
+            <p id="docxStatus" class="hint" role="status" aria-live="polite"></p>
+            <div id="docxReview" hidden>
+              <div id="docxReviewContext"></div>
+              <p class="hint">Choose supported wording for each accepted edit. Update the linked fact in Applicant evidence if you need a different claim.</p>
+              <div id="docxEdits"></div>
+              <label class="field">Length preference<select id="docxLength">
+                <option value="preserve">Prefer the original page count</option>
+                <option value="flexible">Allow changes in page count</option>
+                <option value="one-page">Require one verified page</option>
+              </select></label>
+              <label class="row"><input id="docxIncludePdf" type="checkbox"> Include PDF if local conversion passes</label>
+              <button id="docxExport" class="btn primary">Validate and export approved edits</button>
+            </div>
+            <div id="docxArtifacts" hidden>
+              <label class="field">Validated version<select id="docxVersion"></select></label>
+              <div id="docxValidation"></div>
+              <div class="row">
+                <button id="docxDownload" class="btn ghost">Download DOCX</button>
+                <button id="docxDownloadPdf" class="btn ghost">Download PDF</button>
+              </div>
+              <div class="row">
+                <button id="docxAttach" class="btn ghost">Select DOCX for application</button>
+                <button id="docxAttachPdf" class="btn ghost">Select PDF for application</button>
+              </div>
+            </div>
+            <p id="docxUploadSelection" class="hint" role="status"></p>
+            <button id="docxClearAttachment" class="btn ghost" hidden>Clear selected application resume</button>
+          </details>
           <div id="coverOut"></div>
         </div>
       </details>
@@ -419,5 +459,6 @@
   <script src="sidepanel.js"></script>
   <script src="application-workflow.js"></script>
   <script src="evidence-panel.js"></script>
+  <script src="docx-panel.js"></script>
 </body>
 </html>

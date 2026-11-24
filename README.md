@@ -14,6 +14,8 @@ A Chrome / Arc extension and a small local server that read a job posting, tailo
 
 </div>
 
+On the Get a Job, Bum! development branch, **Tailor an existing Word resume** uses approved applicant evidence to propose paragraph edits, preserves the source design, and exports a reviewed DOCX with an optional verified PDF. See the [Word tailoring guide](docs/PHASE_3.md).
+
 ### ▶ The 60-second reel
 
 <p align="center">

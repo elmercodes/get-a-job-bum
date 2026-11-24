@@ -59,6 +59,8 @@ Use manual paste for LinkedIn and Indeed descriptions. Do not implement unauthor
 
 Support local models where practical. For cloud providers show: service identity, what data will be sent (job text, selected user facts, approved evidence), whether screenshots are included, and potential API cost. Consumer subscriptions may not include API usage. Never silently switch providers or share more data through fallback. Audit provider retention policies separately, and document that sending a resume to cloud AI is a deliberate privacy tradeoff.
 
+The [Word tailoring workflow](PHASE_3.md) defaults to local evidence ranking. Model ranking is opt-in and sends bounded posting excerpts and approved wording to the authorized provider. Public research uses fixed HTTPS sources and sends no applicant records. Word originals, reviews, staged files and validated artifacts share the private application-data root. Default artifact names are ignored in Git. The local Linux renderer uses an isolated filesystem, a private profile and no network. Exported copies should be kept in a private user-controlled location.
+
 ## 7. Logging and diagnostics
 
 Use structured logs with event IDs, timings, categories, reason codes—not raw names, email, resume text, scraped form contents, credentials or screenshots. Mask URLs if they contain personal query parameters. Diagnostics export must have an explicit preview/redaction screen. Consent required before including real snapshots; never upload as GitHub issue by default. CI fixtures must be synthetic and visibly labeled fictional.

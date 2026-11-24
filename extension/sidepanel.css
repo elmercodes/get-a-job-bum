@@ -217,6 +217,9 @@ textarea { resize: vertical; min-height: 70px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .field { display: block; margin: 8px 0 2px; font-size: 11.5px; font-weight: 600; color: var(--muted); }
 .field input, .field textarea { font-weight: 400; color: var(--fg); }
+#docxPanel fieldset { min-width: 0; margin: 12px 0; border: 1px solid var(--line); border-radius: var(--radius); }
+#docxPanel select { width: 100%; }
+#docxPanel li, #docxPanel p { overflow-wrap: anywhere; }
 .search { position: relative; }
 .search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; }
 .search input { padding-left: 32px !important; }

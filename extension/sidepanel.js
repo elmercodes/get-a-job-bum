@@ -75,7 +75,7 @@ function toast(msg, bad = false) {
 }
 
 // Every request has a time limit, so a slow AI or network shows an error instead of an endless spinner.
-const API_TIMEOUTS = [[/^\/api\/profile\/import/, 300000], [/^\/api\/(tailor|cover-letter)/, 180000], [/^\/api\/otp/, 200000], [/^\/api\/(email|answer)/, 100000], [/^\/api\/(hackathons|export)/, 90000], [/^\/api\/jobs\/check/, 200000]];
+const API_TIMEOUTS = [[/^\/api\/profile\/import/, 300000], [/^\/api\/docx\//, 150000], [/^\/api\/(tailor|cover-letter)/, 180000], [/^\/api\/otp/, 200000], [/^\/api\/(email|answer)/, 100000], [/^\/api\/(hackathons|export)/, 90000], [/^\/api\/jobs\/check/, 200000]];
 async function api(path, opts = {}) {
   const ms = API_TIMEOUTS.find(([re]) => re.test(path))?.[1] || 30000;
   if (!loopback(SERVER)) throw new Error('Choose a loopback server address');
@@ -96,7 +96,7 @@ async function api(path, opts = {}) {
   });
   if (opts.raw && res.ok) return res.blob();
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+  if (!res.ok) throw Object.assign(new Error(data.error || `Server error ${res.status}`), { code: data.code, details: data.details });
   return data;
 }
 
@@ -385,8 +385,9 @@ function fileKind(f) {
   return 'other';
 }
 
-async function uploadFor(kind) {
+async function uploadFor(kind, field) {
   if (kind === 'resume') {
+    if (state.docxAttachment) return wordResumeForUpload(field);
     const r = await ensureResume();
     return { base64: r.pdfBase64, filename: r.filename, mime: 'application/pdf' };
   }
@@ -431,7 +432,7 @@ async function uploadFiles(tab, files, rows, missingRequired) {
       continue;
     }
     used.add(kind);
-    const doc = await uploadFor(kind).catch((e) => ({ error: e.message }));
+    const doc = await uploadFor(kind, f).catch((e) => ({ error: e.message }));
     let tag;
     // Already there from an earlier pass (the site lists it beside the box): uploading again would add a duplicate.
     if (doc?.filename && (f.uploaded || []).some((n) => n.toLowerCase() === doc.filename.toLowerCase())) {
@@ -1182,7 +1183,7 @@ async function runAll() {
   }
 
   tab = await openApplication(tab);
-  await ensureResume();
+  if (!state.docxAttachment) await ensureResume();
   // No form anywhere, but the post gives a recruiter email: apply by email instead.
   const formFields = (await callAll(tab.id, 'scan')).reduce((n, x) => n + x.result.fields.filter((f) => f.type !== 'file').length, 0);
   const emails = state.job?.emails || [];
