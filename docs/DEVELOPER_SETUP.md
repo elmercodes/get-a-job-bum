@@ -42,6 +42,8 @@ The test launchers use fictional data, disposable Chrome profiles, and isolated 
 
 Run one inherited DevTools harness at a time. It uses port 9337. If the local application API test port is occupied, set `AUTOJOB_TEST_PORT` to an available loopback port. To diagnose a named fixture, run for example `CHROME=/usr/bin/google-chrome scripts/test-phase1.sh scan-widgets`.
 
+For a native-dock smoke check, use headed Chrome with a fresh profile and the unpacked extension. Open a local fictional page, choose **Open side panel** from the panel’s popout menu, then navigate the web tab to a second fictional local page. Confirm Chrome keeps the panel open and the panel can still act on the current tab when paired.
+
 ## Troubleshooting
 
 | Symptom | Check |
@@ -52,6 +54,8 @@ Run one inherited DevTools harness at a time. It uses port 9337. If the local ap
 | DOCX is ready and PDF is unavailable | Structural validation still applies. For PDF on Linux check LibreOffice Writer, Poppler, Bubblewrap, and whether the host permits the renderer's sandbox. |
 | Provider unavailable | Confirm the local model is installed or the explicitly authorized backend key and model are correct. Check current API budgets. Use reviewed evidence and manual answers while the provider is unavailable. |
 | Google access is denied | Confirm the correct account is a test user of the same OAuth project and that both Drive and Sheets APIs are enabled. Reconnect to the intended app-managed spreadsheet. See the [Sheets guide](PHASE_5.md). |
+
+The inherited form-report action saves a diagnostic in the private backend data directory. Keep real-site diagnostics private and recreate the problem with a fictional page for a public issue. A scrubber cannot reliably identify every piece of site-provided text.
 
 ## Verify another platform manually
 

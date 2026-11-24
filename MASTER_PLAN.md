@@ -12,7 +12,7 @@
 
 ## 0. Executive decision
 
-Create a **free/open-source, private-by-default, human-supervised job application copilot**. A job seeker browses LinkedIn/Indeed/employer sites, opens a compact Chrome side panel, manually pastes a job description on restricted sites or invokes opt-in capture where permitted, lets AI research the company and role, gets an **evidence-grounded, editable DOCX resume preserving the original template**, and—on permitted application sites—lets an agent fill and verify multi-step applications while requesting missing user facts. A local tracker is authoritative; Google Sheets is an optional synchronized view. **Final submission must remain manual.**
+Create a **free/open-source, private-by-default, human-supervised job application copilot**. A job seeker browses LinkedIn, Indeed, or employer sites, opens a compact Chrome side panel, and pastes a description or explicitly captures a permitted employer posting. The app researches the role, prepares an evidence-grounded, editable DOCX in the original template, and assists with multi-step form completion on permitted sites while asking for missing facts. The local tracker is authoritative. Google Sheets is an optional synchronized view. **Assisted final submission requires separate application-specific approval.**
 
 This is **not** a mass-apply bot, a LinkedIn scraper, a CAPTCHA bypass tool, a career-fact fabrication system, or a cloud service that needs to hold applicants' personal histories. Do not position it as any of those.
 
@@ -59,7 +59,7 @@ These are **documented claims, not proof of reliability**. The first phase of en
 
 **Journey A — LinkedIn/manual paste:** Open a job listing → open side panel → paste job description (and optionally job title/company/URL) → start research → inspect grounded role-fit summary → generate proposed resume changes → review accepted edits → download DOCX and optional PDF → save to local tracker as `prepared` → click employer's official careers link or apply manually.
 
-**Journey B — employer-hosted position:** Open permitted company careers posting → user explicitly chooses `Read current job` → verify captured text and URL → research → tailor → review → start `Assist application` → field-by-field fill and verification → pause for user answers, login, CAPTCHA, inaccessible controls, consent → reach final confirmation screen and STOP → user manually submits → app confirms successful submission from user approval or strong confirmation evidence; writes actual `submitted_at` and syncs tracking.
+**Journey B — employer-hosted position:** Open a permitted posting → explicitly read and verify captured text and URL → research → tailor → review → fill and verify fields → pause for missing answers, sign-in, CAPTCHA, inaccessible controls, or exact consent approval → stop for final review → request separate application-specific approval for assisted Submit → verify a receipt or ask for confirmation → update tracking and optionally sync.
 
 **Journey C — missing information:** Agent cannot find a legally authorized answer to a form question → marks blocked, displays exact question and available choices, offers `answer once`, `save as reusable`, `skip`, or `manual` → stores only approved non-secret answer with scope/expiry/conditions → resumes only after successful readback.
 
@@ -490,7 +490,7 @@ One-click install, Chrome Web Store distribution, desktop app/native OS control,
 - **Reliability:** all “critical” acceptance tests pass on two consecutive clean installs. At least 95% of intended deterministic fields correctly filled and read back on the project's **documented synthetic test suite**, with all misses surfaced (not disguised as success). Report both pass rate and denominator. Do not claim this number for arbitrary employer portals.
 - **DOCX:** 100% of approved edits applied or explicitly rejected with reason; no silent corruption; all supported synthetic templates pass parser, text, style signature and preview tests; exact layout parity claims limited to supported document structures.
 - **Tracking:** zero duplicates for identical IDs in retry tests; `submitted_at` never populated without a successful, explicitly confirmed submission.
-- **Usability:** user can complete capture→research→review DOCX→save→form assist→manual submit→track through the panel without terminal actions after setup. Exceptions are manual login/CAPTCHA/native file chooser and clearly flagged unsupported controls.
+- **Usability:** the user can capture a posting, research it, review the DOCX, assist with the application, separately approve submission, and track the receipt from the panel after setup. Login, CAPTCHA, native file choosers, and flagged unsupported controls require direct handling.
 - **Privacy:** all external transmissions enumerated and user-consented. No logs/screenshot uploads outside explicit opt-in.
 - **Performance:** record baseline elapsed time per phase and provider costs, include timeouts and graceful cancellation. Do not promise a universal minutes-to-completion number.
 
@@ -547,7 +547,7 @@ No need to delay Phase 0 or fake-data development for these details.
 - **D05** DOCX is the master resume artifact; PDF is optional derivative. Only promise preservation within supported template structure.
 - **D06** Local tracker authoritative; Google Sheets optional sync. No mandatory n8n dependency.
 - **D07** Page-by-page supervised browser control only; no system-wide desktop agent.
-- **D08** Final Submit never automated.
+- **D08** Assisted final Submit requires separate application-specific approval under the Phase 1 policy.
 - **D09** Local/private data never tracked in Git; storage outside worktree preferred.
 - **D10** No pre-filled personal/eligibility/consent assumptions from upstream; block until approved.
 - **Open:** which browser manifest permissions are strictly necessary; exact donor DOCX module dependency shape; whether to retain JSON store or migrate to SQLite; OAuth scope and implementation; which locally available document renderer offers reliable v0.1 checks; exact usable test coverage. Close through Phase 0 ADRs, not unsupported guesses.
