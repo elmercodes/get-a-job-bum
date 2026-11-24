@@ -4,13 +4,14 @@
   "description": "Local server for Auto Job: tailors ATS-friendly resumes and cover letters, answers application forms from your profile, reads email OTPs. Runs on your own laptop.",
   "main": "index.js",
   "scripts": {
-    "test": "node test/security.mjs && node test/phase1.mjs && node test/evidence.mjs && node test/provider-privacy.mjs && npm run test:docx && npm run test:phase4 && node test/export.mjs && node test/jobcheck.mjs && node test/amazon-answers.mjs && node test/panel-smoke.mjs && node test/run-all.mjs",
+    "test": "node test/security.mjs && node test/phase1.mjs && node test/evidence.mjs && node test/provider-privacy.mjs && npm run test:docx && npm run test:phase4 && npm run test:sheets && node test/export.mjs && node test/jobcheck.mjs && node test/amazon-answers.mjs && node test/panel-smoke.mjs && node test/run-all.mjs",
     "test:docx": "node test/docx-engine.mjs && node test/docx-api.mjs && node test/docx-transaction.mjs",
     "test:phase4": "node test/public-http.mjs && node test/research-security.mjs && node test/docx-compatibility.mjs",
     "test:portable": "npm run test:phase4 && node test/docx-engine.mjs && node test/export.mjs && node test/jobcheck.mjs",
     "word:samples": "node test/docx-compatibility.mjs --samples",
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "test:sheets": "node test/sheets.mjs"
   },
   "keywords": [
     "job-application",

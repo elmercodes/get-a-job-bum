@@ -62,6 +62,10 @@ server/test/reports/
 
 # Default names for private evidence archives exported from the app.
 applicant-evidence*.json
+client_secret*.json
+google-sheets-tokens.json
+google-sheets-sync.json
+google-sheets-sync.json.lock
 tailored-resume-*.docx
 tailored-resume-*.pdf
 /profile.json

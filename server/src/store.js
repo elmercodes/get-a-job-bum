@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { followUpDate, migrateTracker, samePosting, trackerUrl } from './tracker-schema.js';
 
 import { DATA_DIR, RESUME_DIR, DOCS_DIR, readJSON as read, writeJSON } from './storage.js';
 import { loadEvidence, updateDocument } from './evidence-store.js';
@@ -92,49 +94,60 @@ export function getProfile() {
 }
 
 // ---------- application tracker ----------
-// One record per job (matched by URL, else company + title), with a status history.
+// The tracker owns application identity and status history.
 export const STATUSES = ['saved', 'prepared', 'submission_unverified', 'applied', 'assessment', 'interview1', 'interview2', 'interview3', 'hr', 'offer', 'accepted', 'rejected', 'withdrawn'];
 
-const appKey = (a) => (a.url ? String(a.url).split('#')[0] : `${a.company || ''}|${a.title || ''}`.toLowerCase());
+function readApplications() {
+  const apps = read(APPS, []);
+  if (migrateTracker(apps)) write(APPS, apps);
+  return apps;
+}
+
+function touch(app, now = new Date().toISOString()) {
+  app.updatedAt = now;
+  app.revision++;
+}
 
 export function upsertApplication(entry) {
-  const apps = read(APPS, []);
+  const apps = readApplications();
   const now = new Date().toISOString();
   const status = STATUSES.includes(entry.status) ? entry.status : 'saved';
-  let app = apps.find((a) => (entry.id && a.id === entry.id) || appKey(a) === appKey(entry));
+  let app = entry.id ? apps.find((a) => a.id === entry.id) : !entry.separate && apps.find((a) => samePosting(a, entry));
   if (!app) {
-    app = { id: Math.random().toString(36).slice(2, 10), createdAt: now, history: [], notes: '' };
+    const id = randomUUID();
+    app = { id, applicationId: id, revision: 0, createdAt: now, history: [], notes: '' };
     apps.unshift(app);
   }
-  const { id, history, ...fields } = entry;
+  const { id, applicationId, history, separate, ...fields } = entry;
   // Saving a job for later never downgrades one you already applied to.
-  const keepStatus = (status === 'saved' && app.status && app.status !== 'saved') || app.status === 'submission_unverified';
+  const keepStatus = (['saved', 'prepared'].includes(status) && app.status && !['saved', 'prepared'].includes(app.status)) ||
+    (status === 'saved' && app.status === 'prepared') || app.status === 'submission_unverified';
   Object.assign(app, Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined && v !== '')), { status: keepStatus ? app.status : status, updatedAt: now });
   if (!keepStatus && app.history.at(-1)?.status !== app.status) app.history.push({ status: app.status, at: now });
-  if (app.status === 'applied' && !app.appliedAt) app.appliedAt = now;
-  write(APPS, apps.slice(0, 2000));
+  touch(app, now);
+  write(APPS, apps);
   return app;
 }
 
 // Extra things kept on an application (follow-up draft, prep brief) without touching its status or history.
 export function saveAppExtra(id, extra) {
-  const apps = read(APPS, []);
+  const apps = readApplications();
   const app = apps.find((a) => a.id === id);
   if (!app) return null;
   Object.assign(app, extra);
+  touch(app);
   write(APPS, apps);
   return app;
 }
 
 export function updateApplication(id, patch) {
-  const apps = read(APPS, []);
+  const apps = readApplications();
   const app = apps.find((a) => a.id === id);
   if (!app) return null;
   const now = new Date().toISOString();
   if (app.status !== 'submission_unverified' && patch.status && STATUSES.includes(patch.status) && patch.status !== app.status) {
     app.status = patch.status;
     app.history.push({ status: patch.status, at: now });
-    if (patch.status === 'applied' && !app.appliedAt) app.appliedAt = now;
   }
   for (const k of ['notes', 'title', 'company', 'url', 'location', 'contact']) if (k in patch) app[k] = patch[k];
   // An email that moved (or confirmed) this application: kept so it's never applied twice, and shown on the card.
@@ -143,28 +156,43 @@ export function updateApplication(id, patch) {
     if (app.history.at(-1)) app.history.at(-1).source = patch.status ? `email: ${String(patch.mail.subject || '').slice(0, 80)}` : app.history.at(-1).source;
   }
   if (patch.status === 'rejected' && patch.mail) app.rejectedAt = patch.mail.date || now;
-  app.updatedAt = now;
+  if ('followUpDate' in patch) app.followUpDate = followUpDate(patch.followUpDate);
+  touch(app, now);
   write(APPS, apps);
   return app;
 }
 
 export function deleteApplication(id) {
-  write(APPS, read(APPS, []).filter((a) => a.id !== id));
+  write(APPS, readApplications().filter((app) => app.id !== id));
 }
 
-// Older logs were plain {title, company, url, at}; give them ids and a status.
-export const listApplications = () => {
-  const apps = read(APPS, []);
-  let changed = false;
-  for (const a of apps) {
-    if (!a.id) {
-      Object.assign(a, { id: Math.random().toString(36).slice(2, 10), status: 'applied', createdAt: a.at, appliedAt: a.at, history: [{ status: 'applied', at: a.at }], notes: '' });
-      changed = true;
-    }
+export const listApplications = readApplications;
+
+export function recordPreparedResume({ id, job, createdAt }) {
+  if (!job?.title && !job?.company && !job?.url) return null;
+  const existing = readApplications().find((app) => samePosting(app, job));
+  if (existing?.resumeVersion === id || (existing?.resumePreparedAt && existing.resumePreparedAt >= createdAt)) return existing;
+  const { title, company, location, url } = job;
+  return upsertApplication({ id: existing?.id, title, company, location, url, status: 'prepared',
+    preparedAt: existing?.preparedAt || createdAt, resumePreparedAt: createdAt, resumeVersion: id });
+}
+
+export function confirmManualApplication(id) {
+  const apps = readApplications();
+  const record = apps.find((app) => app.id === id);
+  if (!record || record.submissionAttemptedAt || record.verifiedAt) return null;
+  const now = new Date().toISOString();
+  record.appliedAt ||= now;
+  record.verifiedAt = now;
+  record.verification = 'user_confirmed';
+  if (['saved', 'prepared', 'submission_unverified'].includes(record.status)) {
+    record.status = 'applied';
+    record.history.push({ status: 'applied', at: now });
   }
-  if (changed) write(APPS, apps);
-  return apps;
-};
+  touch(record, now);
+  write(APPS, apps);
+  return record;
+}
 
 export const logApplication = (entry) => upsertApplication({ ...entry, status: entry.status || 'applied' });
 
@@ -231,12 +259,17 @@ export const bankKey = (label) =>
 // A click lease is consumed before the extension interacts with the employer page.
 // The recorded attempt survives process restarts and ambiguous browser outcomes.
 export function prepareSubmission({ nonce, url, snapshot, label, job }) {
-  const submitted = read(APPS, []);
-  const identity = (job?.url || url).split('#')[0];
-  const existing = submitted.find((item) => appKey(item) === identity || item.portalUrl === url);
-  if (existing?.submissionAttemptedAt || existing?.appliedAt) return null;
+  const submitted = readApplications();
+  const identity = trackerUrl(job?.url || url);
+  const portal = trackerUrl(url);
+  if (!identity || !portal) return null;
+  const matches = submitted.filter((item) => trackerUrl(item.url) === identity || trackerUrl(item.portalUrl) === portal);
+  if (matches.some((item) => item.submissionAttemptedAt || item.appliedAt || item.status === 'applied')) return null;
+  const existing = matches.find((item) => samePosting(item, { ...job, url: identity }) || item.portalUrl === url) ||
+    (!job?.title && !job?.company && matches.length === 1 ? matches[0] : undefined);
+  if (!existing && !job?.title && matches.length > 1) return null;
   const record = upsertApplication({
-    id: existing?.id, url: identity, title: job?.title, company: job?.company, status: 'prepared',
+    id: existing?.id, url: identity, title: job?.title, company: job?.company, status: 'prepared', via: 'portal',
     portalUrl: url, preparedAt: new Date().toISOString(),
     submissionReview: { nonce, snapshot, label, expires: Date.now() + 10 * 60_000 },
   });
@@ -244,7 +277,7 @@ export function prepareSubmission({ nonce, url, snapshot, label, job }) {
 }
 
 export function authorizeSubmission(id, details) {
-  const applications = read(APPS, []);
+  const applications = readApplications();
   const record = applications.find((item) => item.id === id);
   const review = record?.submissionReview;
   if (!record || record.submissionAttemptedAt || record.status !== 'prepared' ||
@@ -253,13 +286,14 @@ export function authorizeSubmission(id, details) {
   delete record.submissionReview;
   record.submissionAttemptedAt = record.updatedAt = new Date().toISOString();
   record.status = 'submission_unverified';
+  touch(record);
   record.history.push({ status: record.status, at: record.updatedAt });
   write(APPS, applications);
   return { nonce: review.nonce, snapshot: review.snapshot, url: record.portalUrl, expires: Date.now() + 10_000 };
 }
 
 export function settleSubmission(id, evidence) {
-  const applications = read(APPS, []);
+  const applications = readApplications();
   const record = applications.find((item) => item.id === id);
   if (!record?.submissionAttemptedAt || record.status !== 'submission_unverified') return null;
   const now = new Date().toISOString();
@@ -272,7 +306,7 @@ export function settleSubmission(id, evidence) {
     record.verification = evidence.receipt ? 'portal_receipt' : 'user_confirmed';
     record.history.push({ status: record.status, at: now });
   }
-  record.updatedAt = now;
+  touch(record, now);
   write(APPS, applications);
   return { status: record.status, submittedAt: record.submittedAt, verifiedAt: record.verifiedAt };
 }

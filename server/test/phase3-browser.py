@@ -146,6 +146,8 @@ with TemporaryDirectory() as folder, sync_playwright() as playwright:
         panel.locator("#docxIncludePdf").check()
         panel.locator("#docxExport").press("Space")
         expect(panel.locator("#docxStatus")).to_contain_text("Ready for download", timeout=90000)
+        prepared = api("/applications")["items"][0]
+        assert prepared["status"] == "prepared" and prepared["resumeVersion"] and "appliedAt" not in prepared
         name, final = download(panel, "#docxDownload")
         assert re.fullmatch(r"tailored-resume-[a-f0-9]{10}\.docx", name)
         with ZipFile(BytesIO(final)) as artifact, ZipFile(BytesIO(fixture)) as original:

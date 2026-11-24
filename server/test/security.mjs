@@ -11,6 +11,11 @@ assert.equal(await health({ Authorization: 'Bearer wrong' }), 401);
 assert.equal(await health(auth), 200);
 assert.equal(await health({ ...auth, Origin: base }), 200);
 assert.equal(await health({ ...auth, Origin: 'https://example.invalid' }), 403);
+assert.equal((await fetch(base + '/api/sheets/status')).status, 401);
+assert.equal((await fetch(base + '/api/sheets/retry', { method: 'POST', headers: { ...auth, Origin: 'https://example.invalid' } })).status, 403);
+const sheets = await (await fetch(base + '/api/sheets/status', { headers: auth })).json();
+assert.equal(sheets.enabled, false);
+assert.equal(sheets.connected, false);
 const restrictedUrls = ['http://127.0.0.1/fictional', 'http://169.254.169.254/fictional', 'http://[::1]/fictional',
   'https://linkedin.com/jobs/view/fictional', 'https://fixture:example@fictional.example.com/'];
 const jobCheck = await fetch(base + '/api/jobs/check', { method: 'POST',

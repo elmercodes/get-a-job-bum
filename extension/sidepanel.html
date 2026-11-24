@@ -294,6 +294,28 @@
 
     <!-- TRACKER -->
     <section id="tab-tracker" class="tab">
+      <details class="card" id="sheetsPanel">
+        <summary>Google Sheets sync</summary>
+        <p class="hint">Allow Google to receive application IDs, employer and role, location, public posting link, source, tracker dates and status, resume version ID and follow-up date. Local notes and documents stay private.</p>
+        <p id="sheetsStatus" role="status" class="hint"></p>
+        <div class="row">
+          <button id="sheetsConnect" class="btn ghost sm">Connect Google</button>
+          <button id="sheetsDisconnect" class="btn ghost sm">Disconnect</button>
+          <button id="sheetsRefresh" class="btn ghost sm">Refresh sync status</button>
+        </div>
+        <div class="row">
+          <button id="sheetsCreate" class="btn ghost sm">Create tracker spreadsheet</button>
+          <button id="sheetsClearPending" class="btn ghost sm" hidden>Clear pending creation</button>
+          <a id="sheetsLink" target="_blank" rel="noopener noreferrer" hidden>Open linked spreadsheet</a>
+        </div>
+        <label class="field">Google spreadsheet ID or link<input id="sheetsDestination" placeholder="App-managed tracker link" /></label>
+        <div class="row">
+          <button id="sheetsSelect" class="btn ghost sm">Select tracker</button>
+          <button id="sheetsToggle" class="btn primary sm">Enable sync</button>
+          <button id="sheetsRetry" class="btn ghost sm">Retry sync</button>
+        </div>
+        <div id="sheetsConflicts"></div>
+      </details>
       <div class="card">
         <div class="row between" style="margin:0 0 6px">
           <h3 class="card-title" style="margin:0">Your applications</h3>
@@ -332,6 +354,7 @@
           <input id="addCompany" placeholder="Company" />
         </div>
         <input id="addUrl" placeholder="Job link (optional)" />
+        <label><input id="addSeparate" type="checkbox" /> Save as a separate application</label>
         <div class="row">
           <button id="addCurrent" class="btn ghost sm">Use current tab</button>
           <button id="addApp" class="btn primary sm">Add</button>
@@ -461,5 +484,6 @@
   <script src="application-workflow.js"></script>
   <script src="evidence-panel.js"></script>
   <script src="docx-panel.js"></script>
+  <script src="sheets-panel.js"></script>
 </body>
 </html>

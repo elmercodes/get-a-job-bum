@@ -2,6 +2,8 @@ import 'dotenv/config';
 import docxRoutes from './docx-routes.js';
 import { DocxError } from './docx-engine.js';
 import { deleteDocxReviews } from './docx-service.js';
+import { sheetsRoutes } from './sheets-routes.js';
+import { trackerCsv } from './tracker-schema.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
@@ -34,7 +36,7 @@ import { mailConfigured, scheduledMailHours, mailStatus, findVerification, sendA
 import { renderResumePDF, renderCoverLetterPDF } from './pdf.js';
 import { answerFields } from './answer.js';
 import { followUpDraft, interviewPrep } from './coach.js';
-import { saveAppExtra, DATA_DIR, writeJSON, backupData, prepareSubmission, authorizeSubmission, settleSubmission } from './store.js';
+import { saveAppExtra, DATA_DIR, writeJSON, backupData, prepareSubmission, authorizeSubmission, settleSubmission, confirmManualApplication } from './store.js';
 import { getProfile, listApplications, upsertApplication, updateApplication, deleteApplication, STATUSES, getDocument, saveDocument, removeDocument, DOCUMENT_KINDS, RESUME_DIR, recordGaps, listGaps, saveGaps } from './store.js';
 
 const PORT = Number(process.env.PORT || 8787);
@@ -66,6 +68,9 @@ const documentUpload = multer({ storage: multer.memoryStorage(), limits: { ...up
 const route = (fn) => (req, res, next) => fn(req, res).catch(next);
 
 app.use('/api/docx', docxRoutes);
+const sheets = sheetsRoutes(PORT);
+app.use('/api/sheets', sheets.router);
+app.get('/oauth/google-sheets/callback', sheets.callback);
 
 app.get('/api/health', (req, res) => res.json({ ok: true, llm: describeProvider(), heavy: describeHeavy(), resting: geminiStatus(), usingLocalAI: usedFallbackRecently(), gmail: mailEnabled && mailConfigured(), vision: visionEnabled, hasProfile: !!getProfile(), ai: aiUsage() }));
 
@@ -475,15 +480,25 @@ app.post('/api/export', route(async (req, res) => {
 }));
 
 // Pending reviews and review nonces are internal workflow records.
+const viewTrackerEntry = ({ submissionReview, ...item }) => item;
 app.get('/api/applications', (req, res) => res.json({
   statuses: STATUSES,
-  items: listApplications().map(({ submissionReview, ...item }) => item),
+  items: listApplications().map(viewTrackerEntry),
 }));
-const trackerEntry = (entry) => Object.fromEntries(
-  ['id', 'title', 'company', 'location', 'url', 'notes', 'contact', 'status', 'description', 'resume', 'coverLetter'].map((key) => [key, entry?.[key]]),
-);
-app.post('/api/applications', (req, res) => res.json(upsertApplication(trackerEntry(req.body))));
-app.post('/api/applications/bulk', (req, res) => res.json((req.body.items || []).map((a) => upsertApplication(trackerEntry(a)))));
+const trackerEntry = (entry, via) => ({ ...Object.fromEntries(
+  ['title', 'company', 'location', 'url', 'notes', 'contact', 'status', 'description', 'resume', 'coverLetter']
+    .filter((key) => typeof entry?.[key] === 'string').map((key) => [key, entry[key].slice(0, key === 'description' ? 15000 : 4096)]),
+), via });
+app.post('/api/applications', (req, res) => res.json(viewTrackerEntry(upsertApplication({ ...trackerEntry(req.body), separate: req.body?.separate === true }))));
+app.post('/api/applications/bulk', (req, res) => res.json((Array.isArray(req.body?.items) ? req.body.items : []).slice(0, 2000)
+  .map((item) => viewTrackerEntry(upsertApplication(trackerEntry(item, 'job_board'))))));
+app.get('/api/applications/export.csv', (req, res) => res.attachment('applications-' + new Date().toISOString().slice(0, 10) + '.csv')
+  .type('text/csv').send(trackerCsv(listApplications())));
+app.post('/api/applications/:id/confirm', (req, res) => {
+  const row = req.body?.confirmed === true && confirmManualApplication(req.params.id);
+  if (!row) return res.status(409).json({ error: 'This application cannot be confirmed from this action.' });
+  res.json(viewTrackerEntry(row));
+});
 function webUrl(value) {
   if (typeof value !== 'string' || value.length > 2048) return '';
   try {
@@ -606,7 +621,7 @@ if (SCAN_HOURS > 0 && mailConfigured() && !process.env.CI) {
 app.patch('/api/applications/:id', (req, res) => {
   const a = updateApplication(req.params.id, req.body);
   if (!a) return res.status(404).json({ error: 'Not found' });
-  res.json(a);
+  res.json(viewTrackerEntry(a));
 });
 app.delete('/api/applications/:id', (req, res) => {
   const gone = listApplications().find((a) => a.id === req.params.id);
@@ -637,6 +652,7 @@ if (!process.env.CI) {
 }
 
 const server = app.listen(PORT, '127.0.0.1', () => {
+  sheets.start();
   const { provider, model } = describeProvider();
   console.log(`Auto Job server on http://localhost:${PORT}  (LLM: ${provider} / ${model})`);
 });

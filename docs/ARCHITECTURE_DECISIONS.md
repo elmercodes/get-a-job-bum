@@ -53,3 +53,11 @@ The local engine enumerates candidate variants from approved facts, links them t
 For A03–A06 and the security acceptance checks, use native Node HTTP and HTTPS for public sources. Canonicalize URLs and restrict ports and schemes. Check the whole DNS answer, connect directly to a validated address, and preserve the original host for TLS and HTTP. Reapply the policy on each redirect. Bound connection time, response size and media type. Installation-configured model and mail endpoints remain separate credential-bearing integrations.
 
 Use the Phase 3 public research path from both panels. Retrieve bounded official-site excerpts and independent sources. Treat excerpts as quoted data and let a configured model rank existing source IDs only. Compute possible fits locally from approved fields and the posting. Keep old generated research snapshots outside the verified-cache schema. Keep the Word editor's existing read-only boundaries and exercise them through a synthetic compatibility corpus.
+
+## ADR 006. Local application history with a one-way Sheets projection
+
+R13 and A30–A35 extend the existing tracker. Each record has a generated UUID for synchronization. Migration preserves existing API IDs, URLs, statuses, timestamps, document references, and history. A posting is a duplicate hint, and the tracker supports explicitly saving a separate application. The spreadsheet applied date requires a verified receipt or explicit confirmation.
+
+A separate private outbox checkpoints intended writes before network calls. Each pass derives outstanding work from the tracker and the last verified row hash, so a crash between a tracker write and outbox reconciliation does not lose the update. An atomic Sheets batch appends the managed cells and a unique developer metadata guard. A fresh read by application UUID verifies every write. Row positions come from fresh reads. Conflicting edits stop writes for that application until the user chooses a resolution.
+
+Use Desktop OAuth with a loopback callback and PKCE. The only scope is drive.file. Token storage stays on the local backend. Users can create a dedicated tracker or reconnect an application-managed sheet owned by this installation. Notes in the spreadsheet are manual. The local tracker never imports Google edits.

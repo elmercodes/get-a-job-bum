@@ -18,6 +18,8 @@ On the Get a Job, Bum! development branch, **Tailor an existing Word resume** us
 
 For a clean local installation, fictional end-to-end exercise, and the current release checks, use the [Phase 4 developer and verification guide](docs/PHASE_4.md).
 
+The local tracker works offline and can optionally synchronize a minimal view to a Google Sheet. See the [Google Sheets setup and verification guide](docs/PHASE_5.md).
+
 ### ▶ The 60-second reel
 
 <p align="center">

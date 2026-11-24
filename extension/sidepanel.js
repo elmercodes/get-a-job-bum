@@ -1606,15 +1606,20 @@ function renderTracker() {
     ? list
         .map((a, i) => {
           const m = STATUS[a.status] || STATUS.applied;
+          const confirmation = a.submissionAttemptedAt && a.status === 'submission_unverified'
+            ? `<button data-confirm-submission="${esc(a.id)}">I verified submission on the employer site</button>`
+            : !a.verifiedAt && !a.submissionAttemptedAt
+              ? `<button data-manual-applied="${esc(a.id)}">Confirm I applied</button>` : '';
           const tl = (a.history || []).map((h, j) => `${j ? '<span class="ln"></span>' : ''}<span class="dot" style="--c:${(STATUS[h.status] || m).c}" title="${(STATUS[h.status] || m).label} · ${ago(h.at)}"></span>`).join('');
           return `<div class="app" data-id="${a.id}" style="--c:${m.c};--i:${Math.min(i, 20)}">
             <div class="app-top"><div><div class="app-title">${esc(a.title || 'Untitled role')}</div>
-              <div class="app-sub">${esc([a.company, a.location].filter(Boolean).join(' · '))}${a.via === 'email' ? ' · via email' : ''} · ${['saved', 'prepared', 'submission_unverified'].includes(a.status) ? STATUS[a.status].label : 'applied'} ${ago(a.appliedAt || a.createdAt)}</div></div>
+              <div class="app-sub">${esc([a.company, a.location].filter(Boolean).join(' · '))}${a.via === 'email' ? ' · via email' : ''} · ${m.label} ${ago(a.verifiedAt || a.updatedAt || a.createdAt)}</div></div>
               <select class="status-select" data-status="${a.id}" style="--c:${m.c}">${Object.entries(STATUS).map(([k, s]) => `<option value="${k}" ${k === a.status ? 'selected' : ''}>${s.icon} ${s.label}</option>`).join('')}</select></div>
             <div class="timeline">${tl}<span class="tl">${m.label}${a.history?.length ? ` · ${ago(a.history.at(-1).at)}` : ''}</span></div>
             ${mailLine(a)}${mailTimeline(a)}
+            <label class="field">Follow-up date<input type="date" data-follow-up="${esc(a.id)}" value="${esc(a.followUpDate || '')}" /></label>
             <textarea class="app-notes" data-notes="${a.id}" rows="1" placeholder="Add a note (recruiter name, test date, link…)">${esc(a.notes || '')}</textarea>
-            <div class="app-actions">${a.resume ? `<button data-artifact="${esc(a.resume)}">📄 Resume sent</button>` : ''}${a.coverLetter ? `<button data-artifact="${esc(a.coverLetter)}">✉️ Cover letter</button>` : ''}${a.status === 'submission_unverified' ? `<button data-confirm-submission="${esc(a.id)}">I verified submission on the employer site</button>` : ''}${a.status === 'saved' && a.url ? `<button class="go" data-apply="${a.id}">Apply now</button>` : ''}${a.url && safeUrl(a.url) !== '#' ? `<a href="${esc(a.url)}" target="_blank" rel="noopener noreferrer">Open job</a>` : ''}${coachButtons(a)}<button class="del" data-del="${a.id}">Delete</button></div><div class="app-coach" id="coach-${a.id}"></div>
+            <div class="app-actions">${a.resume ? `<button data-artifact="${esc(a.resume)}">📄 Resume sent</button>` : ''}${a.coverLetter ? `<button data-artifact="${esc(a.coverLetter)}">✉️ Cover letter</button>` : ''}${confirmation}${a.status === 'saved' && a.url ? `<button class="go" data-apply="${a.id}">Apply now</button>` : ''}${a.url && safeUrl(a.url) !== '#' ? `<a href="${esc(a.url)}" target="_blank" rel="noopener noreferrer">Open job</a>` : ''}${coachButtons(a)}<button class="del" data-del="${a.id}">Delete</button></div><div class="app-coach" id="coach-${a.id}"></div>
           </div>`;
         })
         .join('')
@@ -2101,8 +2106,6 @@ $('#emailFound').addEventListener('click', (e) => {
   if (e.target.dataset.email) $('#emailTo').value = e.target.dataset.email;
 });
 on('#refreshTracker', loadTracker);
-// Tracker as CSV for Excel / Sheets. Cells starting with = + - @ are prefixed with ' so a spreadsheet never runs them as formulas.
-const csvCell = (v) => `"${String(v ?? '').replace(/^[=+\-@\t\r]/, "'$&").replace(/"/g, '""')}"`;
 // Excel: each tab's button exports that tab's sheet (data-sheet), colour-coded with Apply links.
 document.querySelectorAll('.xlsx-export').forEach((b) => b.addEventListener('click', busy(b, async () => {
   if (!state.apps.length) state.apps = ((await api('/api/applications').catch(() => ({}))).items || []).filter((a) => a.id);
@@ -2114,9 +2117,11 @@ document.querySelectorAll('.xlsx-export').forEach((b) => b.addEventListener('cli
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   toast(`Excel file saved: ${sheet}`);
 })));
-$('#exportCsv').addEventListener('click', () => {
-  const cols = ['company', 'title', 'status', 'appliedAt', 'updatedAt', 'location', 'url', 'via', 'contact', 'notes'];
-  saveFile(`applications-${new Date().toISOString().slice(0, 10)}.csv`, [cols, ...state.apps.map((a) => cols.map((c) => a[c]))].map((r) => r.map(csvCell).join(',')).join('\r\n'), 'text/csv');
+on('#exportCsv', async () => {
+  const blob = await api('/api/applications/export.csv', { raw: true });
+  const url = URL.createObjectURL(blob);
+  Object.assign(document.createElement('a'), { href: url, download: 'applications-' + new Date().toISOString().slice(0, 10) + '.csv' }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
 });
 on('#refreshHacks', () => loadHacks(true));
 $('#hackSearch').addEventListener('input', renderHacks);
@@ -2177,6 +2182,11 @@ $('#trackStats').addEventListener('click', (e) => {
   renderTracker();
 });
 $('#trackList').addEventListener('change', async (e) => {
+  const followUp = e.target.dataset.followUp;
+  if (followUp) {
+    await patchApp(followUp, { followUpDate: e.target.value }).catch((error) => toast(error.message, true));
+    return;
+  }
   const id = e.target.dataset.status;
   if (!id) return;
   await patchApp(id, { status: e.target.value }).catch((err) => toast(err.message, true));
@@ -2189,6 +2199,12 @@ $('#trackList').addEventListener('focusout', async (e) => {
   if (a && (a.notes || '') !== e.target.value) await patchApp(id, { notes: e.target.value }).catch(() => {});
 });
 $('#trackList').addEventListener('click', async (e) => {
+  const confirm = e.target.dataset.manualApplied;
+  if (confirm && e.isTrusted && window.confirm('Record that you already submitted this application?')) {
+    await api('/api/applications/' + encodeURIComponent(confirm) + '/confirm', { method: 'POST', body: { confirmed: true } })
+      .then(loadTracker).catch((error) => toast(error.message, true));
+    return;
+  }
   const coach = e.target.dataset.coach;
   if (coach) {
     const id = e.target.dataset.id;
@@ -2234,7 +2250,8 @@ on('#addCurrent', async () => {
 on('#addApp', async () => {
   const title = $('#addTitle').value.trim();
   if (!title) throw new Error('Enter the role');
-  await api('/api/applications', { method: 'POST', body: { title, company: $('#addCompany').value.trim(), url: $('#addUrl').value.trim(), status: 'applied' } });
+  await api('/api/applications', { method: 'POST', body: { title, company: $('#addCompany').value.trim(), url: $('#addUrl').value.trim(), status: 'saved', separate: $('#addSeparate').checked } });
+  $('#addSeparate').checked = false;
   ['#addTitle', '#addCompany', '#addUrl'].forEach((x) => ($(x).value = ''));
   await loadTracker();
   toast('Added to your Tracker');

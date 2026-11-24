@@ -302,7 +302,8 @@ on('#docxExport', () => wordAction(async () => {
   renderWordVersions();
   $('#docxVersion').value = version.id;
   showWordVersion();
-  wordStatus('Ready for download. Every accepted edit passed DOCX validation.');
+  wordStatus(version.trackerRecorded === false ? 'Ready for download. The local tracker did not record this version.'
+    : 'Ready for download. Every accepted edit passed DOCX validation.');
 }));
 for (const [suffix, kind] of [['', 'docx'], ['Pdf', 'pdf']]) {
   on('#docxDownload' + suffix, () => wordAction(() => downloadEvidence(wordVersionPath() + '/file/' + kind,

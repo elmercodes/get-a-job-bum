@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { jobSnapshot } from './docx-strategy.js';
 import { researchPublicJob } from './research.js';
+import { recordPreparedResume } from './store.js';
 import {
   attachmentForDocx, createDocxReview, downloadDocxArtifact, exportDocxReview, getDocxReview, listDocxReviews,
 } from './docx-service.js';
@@ -16,7 +17,12 @@ router.post('/research', run(async (req, res) => {
 }));
 router.post('/reviews', run(async (req, res) => res.status(201).json(await createDocxReview(req.body))));
 router.get('/reviews/:id', run((req, res) => res.json(getDocxReview(req.params.id))));
-router.post('/reviews/:id/exports', run(async (req, res) => res.json(await exportDocxReview(req.params.id, req.body))));
+router.post('/reviews/:id/exports', run(async (req, res) => {
+  const exported = await exportDocxReview(req.params.id, req.body);
+  let trackerRecorded = false;
+  try { trackerRecorded = Boolean(recordPreparedResume(exported)); } catch { /* A verified file remains downloadable if tracker storage is unavailable. */ }
+  res.json({ ...exported, trackerRecorded });
+}));
 router.get('/reviews/:id/versions/:version/file/:kind', run((req, res) => {
   const { data, filename } = downloadDocxArtifact(req.params.id, req.params.version, req.params.kind);
   res.attachment(filename).type(req.params.kind === 'docx'
