@@ -53,6 +53,11 @@ try {
   const filled = await answers();
   assert.deepEqual(filled.values, { privacy: true, legal: true, background: true, signature: 'Fictional Applicant' });
   for (const id of ['marketing', 'ambiguous', 'unsupported', 'private']) assert.equal(filled.decisions[id].state, 'manual');
+  const protectedQuestions = ['Password', 'One-time code', 'Government ID', 'Credit card number', 'Expected salary',
+    'Are you willing to relocate to Fictional City?', 'Will you require sponsorship?'];
+  const protectedAnswer = await answers(protectedQuestions.map((label, i) => ({ id: 'protected-' + i, label, type: 'text' })));
+  assert.deepEqual(protectedAnswer.values, {});
+  for (const [i] of protectedQuestions.entries()) assert.equal(protectedAnswer.decisions['protected-' + i].state, 'manual');
   const revised = await answers([
     { ...privacy, terms: 'Keep applicant information for ten years.' },
     { ...background, terms: 'New screening provider will obtain an unrelated financial report for this applicant.' },

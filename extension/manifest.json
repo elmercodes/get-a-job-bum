@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Auto Job",
-  "version": "0.17.0",
+  "name": "Get a Job, Bum!",
+  "version": "0.1.0",
   "description": "Review and fill job applications with local applicant data and explicit submission approval.",
   "permissions": [
     "sidePanel",
@@ -25,7 +25,7 @@
     "default_path": "sidepanel.html"
   },
   "action": {
-    "default_title": "Open Auto Job",
+    "default_title": "Open Get a Job, Bum!",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",
@@ -45,14 +45,14 @@
         "default": "Alt+Shift+J",
         "mac": "Alt+Shift+J"
       },
-      "description": "Open Auto Job in a window"
+      "description": "Open Get a Job, Bum! in a window"
     },
     "open-sidebar": {
       "suggested_key": {
         "default": "Alt+Shift+S",
         "mac": "Alt+Shift+S"
       },
-      "description": "Open Auto Job as a sidebar (Chrome, Edge, Brave)"
+      "description": "Open Get a Job, Bum! as a sidebar"
     }
   },
   "minimum_chrome_version": "116",

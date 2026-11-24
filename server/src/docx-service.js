@@ -74,9 +74,16 @@ function readSource(sourceId) {
   return { ...saved, bytes };
 }
 
+function resumeEvidenceFingerprint(evidence) {
+  return hash(JSON.stringify(evidence.records.filter((record) => record.kind !== 'answer')));
+}
+
 function freshness(review, job) {
   const evidence = loadEvidence();
-  if (evidence.revision !== review.evidenceRevision) throw new DocxError('STALE_EVIDENCE', 'Applicant evidence changed. Generate a new review.');
+  const current = review.evidenceFingerprint
+    ? resumeEvidenceFingerprint(evidence) === review.evidenceFingerprint
+    : evidence.revision === review.evidenceRevision;
+  if (!current) throw new DocxError('STALE_EVIDENCE', 'Applicant evidence changed. Generate a new review.');
   if (job && jobFingerprint(jobSnapshot(job)) !== review.jobKey) throw new DocxError('STALE_JOB', 'The current job differs from this review.');
   const original = readSource(review.source.id);
   if (original.source.sha256 !== review.source.sha256) throw new DocxError('STALE_SOURCE', 'The source document differs from the review.');
@@ -141,6 +148,7 @@ async function generateReview({ id, scope, sourceId, useModel, job }) {
   }
   const review = {
     id, requestScope: scope, engineVersion, job, jobKey: jobFingerprint(job), evidenceRevision: evidence.revision,
+    evidenceFingerprint: resumeEvidenceFingerprint(evidence),
     source: { id: original.source.id, name: original.source.name, sha256: original.source.sha256 },
     createdAt: new Date().toISOString(), model,
     requirements: strategy.requirements, terminology: strategy.terminology,
@@ -223,7 +231,7 @@ async function publish(dir, target, id, context, renderer) {
     const meta = {
       id, reviewId: review.id, engineVersion,
       source: review.source, jobKey: review.jobKey, job: review.job,
-      model: review.model, evidenceRevision: review.evidenceRevision,
+      model: review.model, evidenceRevision: review.evidenceRevision, evidenceFingerprint: review.evidenceFingerprint,
       proposedEditIds: review.proposals.map((edit) => edit.id),
       accepted: accepted.map((edit) => ({ id: edit.id, evidenceIds: edit.evidenceIds, text: edit.text })),
       rejected, evidenceIds: [...new Set(accepted.flatMap((edit) => edit.evidenceIds))],
@@ -292,7 +300,8 @@ export function attachmentForDocx(reviewId, versionId, { job, kind = 'docx' } = 
   if (!job) throw new DocxError('STALE_JOB', 'Supply the current job to attach a validated document.');
   freshness(review, job);
   const { data, filename, meta } = checkedArtifact(dir, versionId, kind);
-  if (meta.reviewId !== review.id || meta.jobKey !== review.jobKey || meta.evidenceRevision !== review.evidenceRevision) {
+  if (meta.reviewId !== review.id || meta.jobKey !== review.jobKey || meta.evidenceRevision !== review.evidenceRevision ||
+      meta.evidenceFingerprint !== review.evidenceFingerprint) {
     throw new DocxError('STALE_JOB', 'The selected document is not current for this job.');
   }
   const current = getDocxReview(reviewId).versions[0];

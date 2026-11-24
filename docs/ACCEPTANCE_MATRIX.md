@@ -1,6 +1,6 @@
 # v0.1 Acceptance matrix — executable expectations
 
-**All items were unverified at plan creation.** See the [Phase 0 audit](UPSTREAM_AUDIT.md) for current evidence and blockers. A test is `VERIFIED` only after a real execution produces an observed result and the test artifact uses fictional data. Capture exact command, environment, date, result, and issue/commit link. P0 is release-blocking; P1 is targeted for v0.1 but may be explicitly deferred with the user's approval.
+The original acceptance criteria are retained below. See the [release verification record](RELEASE_READINESS.md) for the current result and evidence for every ID. A test is `VERIFIED` only after a real execution produces an observed result and the artifact uses fictional data. Record exact commands, environment, date, result, and commit. P0 criteria gate publication. P1 criteria may be deferred with the owner's approval.
 
 | ID | Priority | Test setup and action | PASS criterion |
 |---|---|---|---|
@@ -32,7 +32,7 @@
 | A26 | P0 | User approves one scoped reusable answer | Correct matching future field uses answer with conditions; unrelated contexts prompt |
 | A27 | P0 | Revoke/expire a saved answer | Future form does not reuse revoked/expired answer |
 | A28 | P0 | Form has required consent and a final Submit | Consent follows stored category and exact terms approval. Fill cannot submit. A reviewed application requires a separate one-use approval before assisted submission. |
-| A29 | P0 | Save, prepare and apply fake job | Distinct timestamps; `submitted_at` only after explicit confirmed submission |
+| A29 | P0 | Save, prepare and apply fake job | Preparation, observed click, and verification use separate timestamps. Applied date requires a receipt or explicit manual confirmation. |
 | A30 | P0 | Run same job twice | One canonical job/app record or intentional resume versions; no tracker duplication |
 | A31 | P0 | User edits tracker/exports local data | Updates survive restart; export includes correct fields, no secrets |
 | A32 | P1 | Opt-in Google OAuth/Sheet selection | Only expected minimal scopes and data columns requested |
@@ -59,7 +59,7 @@
 ## Mandatory negative/safety tests beyond happy-path
 
 - Unexpected final-submit label (`Send`, `Finish`, `Confirm`, translated text, nested button) must block.
-- Both Workday Yes/No and Greenhouse checkboxes for consent/legal/EEO must not be auto-ticked.
+- Consent and legal declarations require the appropriate preferences and exact authorization. Unsupported controls and EEO self-identification require direct handling, including Workday and Greenhouse variants.
 - Citizenship, sponsorship, security clearance, pay and relocation must be unknown until expressly configured; defaults from imported code removed.
 - Company research asserting an applicant skill must never turn into a profile claim.
 - DOM iframe/cross-origin/closed shadow root unreachable? Show manual action, not fabricated success.

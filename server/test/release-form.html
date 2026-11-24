@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Data Engineer at Fictional South Labs</title>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"JobPosting","title":"Data Engineer","hiringOrganization":{"@type":"Organization","name":"Fictional South Labs"},"description":"SQL reporting experience is required. Reduce reporting time and use SQL for data validation. AWS certification is preferred."}
+</script>
+<main>
+  <h1>Data Engineer at Fictional South Labs</h1>
+  <p hidden>Hidden fictional unrelated section.</p>
+  <form>
+    <section id="contact">
+      <label for="first">First Name</label><input id="first" name="first" required>
+      <label for="method">How should we contact you?</label>
+      <select id="method" name="method" required><option value="">Choose…</option><option>Email</option><option>Phone</option></select>
+      <button type="button" id="next">Continue</button>
+    </section>
+    <section id="review" hidden>
+      <label for="resume">Resume</label><input id="resume" name="resume" type="file" accept=".docx" required disabled>
+      <label><input id="privacy" type="checkbox" required disabled aria-describedby="privacyNotice"> I acknowledge the privacy policy</label>
+      <p id="privacyNotice">Fictional South Labs retains application materials for six months.</p>
+      <label><input id="legal" type="checkbox" required disabled> I certify that I am at least 18 years old</label>
+      <label for="signature">Electronic signature</label><input id="signature" name="signed" required disabled aria-describedby="signatureNotice">
+      <p id="signatureNotice">I certify that I am at least 18 years old</p>
+      <label><input id="marketing" type="checkbox" disabled> Subscribe to promotional emails</label>
+      <button type="submit" id="final" disabled>Submit application</button>
+    </section>
+  </form>
+</main>
+<script>
+window.submissionCount = 0;
+const form = document.querySelector('form');
+document.querySelector('#next').addEventListener('click', () => {
+  document.querySelector('#contact').hidden = true;
+  document.querySelector('#review').hidden = false;
+  document.querySelectorAll('#review :disabled').forEach((control) => { control.disabled = false; });
+});
+document.querySelector('#signature').addEventListener('change', () => form.requestSubmit());
+document.querySelector('#resume').addEventListener('change', (event) => {
+  if (!event.currentTarget.files.length || document.querySelector('#parsedFirst')) return;
+  document.querySelector('#resume').insertAdjacentHTML('afterend',
+    '<div><label for="parsedFirst">First Name</label><input id="parsedFirst" name="parsed_first" required></div>');
+});
+form.addEventListener('submit', (event) => {
+  event.preventDefault();
+  window.submissionCount++;
+  document.querySelector('main').innerHTML = '<h1>Application received</h1><p>Application ID: FICTIONAL-0100</p>';
+});
+</script>
+</html>

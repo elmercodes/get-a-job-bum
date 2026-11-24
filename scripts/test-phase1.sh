@@ -30,4 +30,8 @@ for attempt in {1..30}; do
   if curl -fsS -H "Authorization: Bearer $AUTOJOB_TOKEN" "$AUTOJOB_URL/api/health" >/dev/null 2>&1; then break; fi
   sleep 0.25
 done
-npm test
+if (($#)); then
+  node test/run-all.mjs "$@"
+else
+  npm test
+fi

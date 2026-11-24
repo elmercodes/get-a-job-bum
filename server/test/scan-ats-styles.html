@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Fictional ATS field patterns</title>
+<main></main>
+<script>
+// Small local composites of ordinary field patterns. Each uses the generic scanner.
+const variants = {
+  Greenhouse: '<label for="email">Email</label><input id="email" type="email" aria-describedby="error" required><div id="error" hidden>Fictional site rejected this email.</div>',
+  Lever: '<fieldset><legend>Contact information</legend><label>Email address<input id="email" type="email" required></label></fieldset>',
+  Ashby: '<section><div id="emailLabel">Email address</div><input id="email" aria-labelledby="emailLabel" type="email" required></section>',
+  iCIMS: '<table><tr><td><label for="email">Email address</label></td><td><input id="email" type="email" required></td></tr></table>',
+};
+const blocked = ['Password', 'One-time code', 'Social Security number', 'Government ID', 'Credit card number'];
+window.selfTest = async () => {
+  const profileEmail = 'fixture@example.invalid';
+  const main = document.querySelector('main');
+  const api = window.__jobfill;
+  const fail = [];
+  let checks = 0;
+  for (const [portal, markup] of Object.entries(variants)) {
+    main.innerHTML = `<form>${markup}${blocked.map((label, i) =>
+      `<label for="restricted${i}">${label}</label><input id="restricted${i}" ${i === 0 ? 'type="password"' : ''}>`).join('')}</form>`;
+    const { fields } = await api.scan();
+    const email = fields.find((field) => /^email/i.test(field.label));
+    if (!email) { fail.push(portal + ' email missing'); continue; }
+    const values = Object.fromEntries(fields.map((field) => [field.id, field === email ? profileEmail : 'fictional restricted marker']));
+    await api.fill(values, []);
+    if (document.querySelector('#email').value !== profileEmail) fail.push(portal + ' email readback failed');
+    if ([...main.querySelectorAll('[id^=restricted]')].some((el) => el.value)) fail.push(portal + ' private field was written');
+    if (portal === 'Greenhouse') {
+      document.querySelector('#email').setAttribute('aria-invalid', 'true');
+      document.querySelector('#error').hidden = false;
+      if (!api.fieldErrors().some(({ id, error }) => id === email.id && /rejected/.test(error))) fail.push('portal validation error was not surfaced');
+    }
+    checks += 1 + blocked.length;
+  }
+  for (const label of ['Send', 'Finish', 'Confirm', 'Enviar']) {
+    main.innerHTML = `<form><button type="submit"><span>${label}</span></button></form>`;
+    let sent = false;
+    main.querySelector('form').addEventListener('submit', (event) => { event.preventDefault(); sent = true; });
+    if (api.nextLabel() || (await api.clickNext())?.ok || (await api.clickSubmit())?.ok || sent) {
+      fail.push(label + ' could be sent without submission approval');
+    }
+    checks++;
+  }
+  return { fields: checks, fail };
+};
+</script>
+</html>

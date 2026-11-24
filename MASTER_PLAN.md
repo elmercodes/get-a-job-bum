@@ -38,7 +38,7 @@ These are **documented claims, not proof of reliability**. The first phase of en
 
 1. **Local-first:** profile, raw resumes, accomplishments, application answers, drafts, generated outputs, and tracker live locally by default. A user explicitly configures any external AI or Google connection.
 2. **No invented facts:** company research indicates employer requirements; only user-confirmed data is evidence of candidate capability. Never infer a degree, certification, role, authorization, number, location preference, salary expectation, clearance, past employment, or protected information.
-3. **Human-controlled applications:** intermediate form steps may be automated after validation; final Submit, legally binding attestation, payment, account creation, and sensitive decisions require manual action. No unattended mass applications.
+3. **Human-controlled applications:** validated intermediate steps may be automated. Assisted final submission and supported attestations require the approvals defined in the Phase 1 policy. Payments, account creation, and unsupported sensitive actions require direct user action.
 4. **Private-by-default Git:** source code and fictional sample fixtures are public; **personal data and secrets never enter Git, logs, screenshots, exported diagnostics, CI artifacts, example files, or public issues**.
 5. **Re-use before re-build:** audit upstream code, retain stable modules, port only the least amount necessary, build adapters over rewrites. Every upstream change must have a reason, tests, and rollback path.
 6. **No ToS circumvention:** no unauthorized LinkedIn/Indeed scraping, automated account behavior on restricted pages, hidden API use, CAPTCHA solving, anti-bot evasion, or cookie theft. User supplies a job description for restricted sites. On employer sites, site policy and technical limits determine supported automation.
@@ -326,8 +326,8 @@ User starts a permitted application run
  -> read back values, inspect portal errors, and reconcile
  -> optionally click validated intermediate Next/Continue/Save
  -> re-observe and re-plan on every page/DOM transition
- -> STOP at final Submit; user reviews and clicks it manually
- -> verify confirmation + ask user to confirm submission
+ -> STOP for review and separate application-specific approval before any assisted Submit
+ -> verify a receipt or ask the user to confirm an ambiguous outcome
  -> persist application record and optionally sync Sheets
 ```
 
@@ -344,10 +344,10 @@ User starts a permitted application run
 | Role-specific written answers | Draft from job + achievements; show supporting evidence; review before use |
 | Salary/notice period/relocation/work authorization/sponsorship/citizenship/clearance | Never assume defaults; scope and confirm before fill; re-confirm when jurisdiction changes |
 | Gender/race/disability/veteran/age/other voluntary self-ID | Leave unset by default; no inference or AI-generated choices; explicit user-entered value and per-field opt-in only |
-| Criminal history, legal disclosures, binding attestations, consent/privacy agreements | Human review and direct action; never auto-check |
+| Criminal history, legal disclosures, attestations, consent/privacy agreements | Direct handling for unsupported requests. Supported acknowledgments and factual declarations follow the Phase 1 category and terms approval policy. |
 | Password/SSN/tax IDs/banking/government IDs/OTP/CAPTCHA | Do not store; do not fill automatically; hand off to user, and never send to model |
 | Login, CAPTCHA, rate limiting, bot detection | Pause; do not bypass restrictions |
-| Final Submit / Apply / Confirm Application | Never click automatically, irrespective of prior UI consent |
+| Final Submit / Apply / Confirm Application | Stop at review. Assisted submit requires a separate one-use approval for the exact reviewed application. |
 
 **Critical upstream change:** Auto Job's documented defaults include answers such as generic relocation `Yes`, certain historical/legal `No` defaults, and consent checkboxes. Remove/disable any assumption-based path in the initial privacy/safety milestone, even if inherited tests pass. Replace with confirmed scoped facts or user questions. Do not assume a list of questions is exhaustive: classification must be conservative.
 
@@ -451,7 +451,7 @@ All stages require test evidence and a small reviewed PR (or clearly scoped comm
 
 - Integrate selected donor per-site adapter concepts and resume upload/section reconciliation only when measured improvements justify them.
 - State machine, durable progress events, retries and timeouts, stable tab/frame identity, user intervention dialog, resume attachment correctness and field verification.
-- Test fake Workday, Greenhouse, Lever, Ashby, iCIMS and generic forms, with localized formatting/validation and dynamic UI. Confirm final submission never triggered; enforce safe behavior even under prompt injection.
+- Test fake Workday, Greenhouse, Lever, Ashby, iCIMS and generic forms with localized formatting, validation and dynamic UI. Verify the separate submission approval gate under ordinary use and untrusted content.
 - **Gate:** pass the matrix's critical flows with controlled fictional accounts/pages and zero unapproved submits or sensitive answer assumptions.
 
 ### Phase 6 — local tracker and optional Sheets sync
@@ -512,7 +512,7 @@ For every tested portal fixture, report **observed**, **attempted**, **verified*
 | R08 | Optional PDF and ATS text checks | P0 | A17 |
 | R09 | Safe multi-step form autofill/readback | P0 | A18–A24 |
 | R10 | Missing-information question and answer memory | P0 | A25–A27 |
-| R11 | Final manual submission barrier | P0 | A28 |
+| R11 | Separate application-specific final submission approval | P0 | A28 |
 | R12 | Local applications tracker and dates | P0 | A29–A31 |
 | R13 | Google Sheets optional synchronization | P1 (release target) | A32–A35 |
 | R14 | Provider selection/BYOK/usage disclosure | P0 | A36–A38 |
@@ -534,7 +534,7 @@ Every PR/agent change must contain: goal, upstream file/provenance impact, priva
 - **Needed before testing with their real files:** original DOCX resume, an achievement inventory, optional approved profile answers and explicitly authorized test data. Until then use fictional samples only.
 - **Needed before real provider integration:** selected provider and key/local Ollama setup, spending/privacy preference. No provider key should be pasted into a public issue or committed file.
 - **Needed before Sheets use:** Google account authorization and selected spreadsheet; never assume existing access.
-- **Needed before real employer applications:** user acknowledgment of target site's terms and explicit authorization to help fill that site; final Submit remains manual.
+- **Needed before real employer applications:** user acknowledgment of the target site's terms and explicit authorization to help fill it. Assisted final submission needs a separate application-specific approval.
 
 No need to delay Phase 0 or fake-data development for these details.
 

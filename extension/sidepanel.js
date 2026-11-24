@@ -1085,7 +1085,7 @@ async function runPages() {
   if (state.fillActive) throw new Error('An application is already filling');
   state.fillActive = true;
   state.fillStopped = false;
-  const buttons = [$('#fill'), $('#continue')];
+  const buttons = [$('#fill'), $('#continue'), $('#reviewApplication')];
   const original = buttons.map((button) => button.disabled);
   for (const button of buttons) button.disabled = true;
   try {

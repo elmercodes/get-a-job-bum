@@ -111,6 +111,12 @@ try {
   assert.ok(selected.records.some((r) => r.id === claim.id && r.data.metrics[0].value === '12.50' && r.data.metrics[0].unit === '%'));
   assert.ok(selected.records.some((r) => r.id === skill.id && r.data.refs[0] === second.id));
   assert.ok(!selected.records.some((r) => [unsupported.id, contact.id].includes(r.id)));
+  const firmware = await save('accomplishment', { original: 'Wrote Rust firmware for a fictional sensor.',
+    skills: ['Rust'], tags: ['firmware'], refs: [second.id] });
+  for (const [description, id] of [['Seeking SQL and data experience', claim.id], ['Seeking Rust and firmware experience', firmware.id]]) {
+    const shortlist = await api('/evidence/select', { method: 'POST', body: { description, limit: 1 } });
+    assert.deepEqual(shortlist.records.map((record) => record.id), [id]);
+  }
 
   await save('education', { school: 'Fictional Graduate School', degree: 'Master of Science', start: '2024', end: '2025' });
   const degreeQuestion = question('Highest degree', 'select', ["Bachelor's Degree", "Master's Degree"]);

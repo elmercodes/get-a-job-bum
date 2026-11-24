@@ -2,6 +2,8 @@
 
 **Blocking policy for v0.1.** Local-first is not equal to invulnerable. Public code can still leak data through logs, broad browser permissions, the local backend, external AI providers, Git history or diagnostic uploads. This document governs the design and release review.
 
+Report vulnerabilities using [SECURITY.md](../SECURITY.md). The [release verification record](RELEASE_READINESS.md) lists the exercised controls and outstanding checks.
+
 ## 1. Data classification
 
 | Level | Data | Default policy |

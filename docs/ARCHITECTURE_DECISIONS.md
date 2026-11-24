@@ -61,3 +61,7 @@ R13 and A30–A35 extend the existing tracker. Each record has a generated UUID 
 A separate private outbox checkpoints intended writes before network calls. Each pass derives outstanding work from the tracker and the last verified row hash, so a crash between a tracker write and outbox reconciliation does not lose the update. An atomic Sheets batch appends the managed cells and a unique developer metadata guard. A fresh read by application UUID verifies every write. Row positions come from fresh reads. Conflicting edits stop writes for that application until the user chooses a resolution.
 
 Use Desktop OAuth with a loopback callback and PKCE. The only scope is drive.file. Token storage stays on the local backend. Users can create a dedicated tracker or reconnect an application-managed sheet owned by this installation. Notes in the spreadsheet are manual. The local tracker never imports Google edits.
+
+## ADR 007. Word review freshness during application completion
+
+For R07 and R09, Word reviews capture a fingerprint of the evidence records outside the application answer bank. New or corrected reusable answers can be saved during Fill without invalidating an already reviewed attachment. Changes to other evidence records, the job snapshot, and the original source continue to invalidate the review. Existing reviews without a fingerprint retain their original whole-store revision check. Historical verified artifacts remain downloadable.
